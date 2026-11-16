@@ -93,6 +93,7 @@ Thumbs.db
 # Local data
 mydatabase.db
 photo_index.db
+photo_index.db-*
 *.db
 *.sqlite
 *.sqlite3
