@@ -1,0 +1,142 @@
+# Photo Indexer stack (Immich hub + local VLM enrichment)
+# Defaults: local-only processing, CPU fallback OK, originals intact.
+# Pin image digests for production and verify tags against current Immich release notes.
+
+name: photo-indexer
+
+services:
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION:-release}
+    container_name: immich-server
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - database
+    environment:
+      TZ: ${TZ:-UTC}
+      DB_HOSTNAME: database
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      DB_DATABASE_NAME: ${DB_DATABASE_NAME:-immich}
+      REDIS_HOSTNAME: redis
+      IMMICH_MACHINE_LEARNING_URL: http://immich-machine-learning:3003
+    ports:
+      - "${IMMICH_PORT:-2283}:2283"
+    volumes:
+      - ${UPLOAD_LOCATION:?UPLOAD_LOCATION is required}:/usr/src/app/upload
+      - ${LIBRARY_LOCATION:?LIBRARY_LOCATION is required}:/data/library:ro
+      - ${STAGING_LOCATION:?STAGING_LOCATION is required}:/data/staging:ro
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      disable: false
+
+  immich-machine-learning:
+    image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION:-release}
+    container_name: immich-machine-learning
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - model-cache:/cache
+    # For NVIDIA GPU acceleration, uncomment and ensure nvidia-container-toolkit is installed:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  redis:
+    image: docker.io/valkey/valkey:8-bookworm
+    container_name: immich-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  database:
+    image: ${IMMICH_DB_IMAGE:-ghcr.io/immich-app/postgres:16-vectorchord0.3.0-pgvectors0.2.0}
+    container_name: immich-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      POSTGRES_DB: ${DB_DATABASE_NAME:-immich}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    shm_size: 128mb
+    volumes:
+      - ${DB_DATA_LOCATION:?DB_DATA_LOCATION is required}:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE_NAME:-immich}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:${OLLAMA_VERSION:-0.5.4}
+    container_name: ollama
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-24h}
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama:/root/.ollama
+    # For NVIDIA GPU acceleration, uncomment:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  immich-analyze:
+    # Verify image/tag/source before use; project availability/tags may change.
+    image: ${IMMICH_ANALYZE_IMAGE:-ghcr.io/timasoft/immich-analyze:0.3.0}
+    container_name: immich-analyze
+    restart: unless-stopped
+    depends_on:
+      - immich-server
+      - ollama
+    environment:
+      TZ: ${TZ:-UTC}
+      IMMICH_API_URL: http://immich-server:2283/api
+      IMMICH_API_KEY: ${IMMICH_API_KEY:-}
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${VLM_MODEL:-llava}
+      # Optional tuning (consult immich-analyze docs for supported vars):
+      # ANALYZE_INTERVAL: ${ANALYZE_INTERVAL:-3600}
+      # DRY_RUN: ${ANALYZE_DRY_RUN:-false}
+
+  exiftool-dump:
+    # Optional job container for full metadata extraction/sidecar workflows.
+    # Run on demand: docker compose --profile jobs run --rm exiftool-dump
+    image: ${EXIFTOOL_IMAGE:-ghcr.io/linuxserver/exiftool:12.76}
+    container_name: exiftool-dump
+    profiles: ["jobs"]
+    restart: "no"
+    environment:
+      TZ: ${TZ:-UTC}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+    volumes:
+      - ${LIBRARY_LOCATION:?LIBRARY_LOCATION is required}:/data/library:ro
+      - ${STAGING_LOCATION:?STAGING_LOCATION is required}:/data/staging:ro
+      - ${UPLOAD_LOCATION:?UPLOAD_LOCATION is required}:/usr/src/app/upload:ro
+      - ${METADATA_DUMP_LOCATION:-./data/metadata}:/data/metadata
+      - ./scripts:/scripts:ro
+      - ./sql:/sql:ro
+    working_dir: /scripts
+    entrypoint: ["/bin/sh", "-lc"]
+    command: ["echo 'Use scripts/exiftool_dump.sh or scripts/write_xmp_sidecar.sh inside this container.'"]
+
+volumes:
+  model-cache:
+  ollama:
