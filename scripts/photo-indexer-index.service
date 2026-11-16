@@ -1,0 +1,15 @@
+[Unit]
+Description=Photo Indexer - Index new files in staging
+After=network.target
+
+[Service]
+Type=oneshot
+User=g8emiller245
+WorkingDirectory=/home/g8emiller245/photo-indexer
+EnvironmentFile=/home/g8emiller245/photo-indexer/.env
+ExecStart=/usr/bin/python3 -m photo_indexer.cli index /home/g8emiller245/photo-indexer/staging --skip-vlm
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

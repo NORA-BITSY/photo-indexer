@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Photo Indexer index every hour
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target

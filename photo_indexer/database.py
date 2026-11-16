@@ -55,10 +55,28 @@ class PhotoIndexDB:
                 );
 
                 CREATE TABLE IF NOT EXISTS enrich_exif (
-                    asset_id   TEXT PRIMARY KEY,
-                    raw_json   TEXT NOT NULL,
+                    asset_id        TEXT PRIMARY KEY,
+                    raw_json        TEXT NOT NULL,
+                    structured_json TEXT,
                     FOREIGN KEY (asset_id) REFERENCES enrich_assets(asset_id) ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS enrich_faces (
+                    id            TEXT PRIMARY KEY,
+                    asset_id      TEXT NOT NULL,
+                    bbox_json     TEXT,
+                    landmarks_json TEXT,
+                    embedding_json TEXT NOT NULL,
+                    det_score     REAL,
+                    age           INTEGER,
+                    gender        INTEGER,
+                    model_name    TEXT,
+                    detected_at   TEXT,
+                    FOREIGN KEY (asset_id) REFERENCES enrich_assets(asset_id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_enrich_faces_asset
+                    ON enrich_faces(asset_id);
 
                 CREATE TABLE IF NOT EXISTS enrich_vlm (
                     asset_id        TEXT PRIMARY KEY,
@@ -152,16 +170,19 @@ class PhotoIndexDB:
             self._upsert_exif(conn, record)
             self._upsert_vlm(conn, record)
             self._upsert_entities(conn, record)
+            self._upsert_faces(conn, record)
             self._upsert_sidecar(conn, record)
 
     def _upsert_exif(self, conn: sqlite3.Connection, record: DBRecord) -> None:
         conn.execute(
             """
-            INSERT INTO enrich_exif (asset_id, raw_json)
-            VALUES (?, ?)
-            ON CONFLICT(asset_id) DO UPDATE SET raw_json=excluded.raw_json
+            INSERT INTO enrich_exif (asset_id, raw_json, structured_json)
+            VALUES (?, ?, ?)
+            ON CONFLICT(asset_id) DO UPDATE SET
+                raw_json=excluded.raw_json,
+                structured_json=excluded.structured_json
             """,
-            (record.asset_id, json.dumps(record.exif_raw)),
+            (record.asset_id, json.dumps(record.exif_raw), json.dumps(record.exif_structured)),
         )
 
     def _upsert_vlm(self, conn: sqlite3.Connection, record: DBRecord) -> None:
@@ -210,6 +231,33 @@ class PhotoIndexDB:
                     e.get("end_char"),
                 ),
             )
+    def _upsert_faces(self, conn: sqlite3.Connection, record: DBRecord) -> None:
+        conn.execute("DELETE FROM enrich_faces WHERE asset_id = ?", (record.asset_id,))
+        try:
+            faces = json.loads(record.face_embeddings_json)
+        except (json.JSONDecodeError, TypeError):
+            faces = []
+        for f in faces:
+            conn.execute(
+                """
+                INSERT INTO enrich_faces
+                (id, asset_id, bbox_json, landmarks_json, embedding_json, det_score, age, gender, model_name, detected_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(f.get("id", "")),
+                    record.asset_id,
+                    json.dumps(f.get("bbox")) if f.get("bbox") else None,
+                    json.dumps(f.get("landmarks")) if f.get("landmarks") else None,
+                    json.dumps(f.get("embedding")) if f.get("embedding") else None,
+                    f.get("det_score"),
+                    f.get("age"),
+                    f.get("gender"),
+                    f.get("model_name", "buffalo_l"),
+                    f.get("detected_at"),
+                ),
+            )
+
 
     def _upsert_sidecar(self, conn: sqlite3.Connection, record: DBRecord) -> None:
         conn.execute(
@@ -246,12 +294,16 @@ class PhotoIndexDB:
             )
             # Load exif
             exif_row = conn.execute(
-                "SELECT raw_json FROM enrich_exif WHERE asset_id = ?", (asset_id,)
+                "SELECT raw_json, structured_json FROM enrich_exif WHERE asset_id = ?", (asset_id,)
             ).fetchone()
             if exif_row:
                 raw = json.loads(exif_row["raw_json"]) if exif_row["raw_json"] else {}
+                structured = json.loads(exif_row["structured_json"]) if exif_row["structured_json"] else {}
                 from .models import ExifMetadata
-                asset.exif = ExifMetadata(raw=raw)
+                if structured:
+                    asset.exif = ExifMetadata(**structured, raw=raw)
+                else:
+                    asset.exif = ExifMetadata(raw=raw)
 
             # Load vlm
             vlm_row = conn.execute(
@@ -277,6 +329,27 @@ class PhotoIndexDB:
                         label=er["label"],
                         confidence=er["confidence"],
                         source=er["source"],
+                    )
+                )
+
+            # Load faces
+            face_rows = conn.execute(
+                "SELECT * FROM enrich_faces WHERE asset_id = ?", (asset_id,)
+            ).fetchall()
+            for fr in face_rows:
+                from .models import FaceEmbedding
+                asset.face_embeddings.append(
+                    FaceEmbedding(
+                        id=UUID(fr["id"]) if fr["id"] else None,
+                        asset_id=UUID(fr["asset_id"]) if fr["asset_id"] else None,
+                        bbox=json.loads(fr["bbox_json"]) if fr["bbox_json"] else None,
+                        landmarks=json.loads(fr["landmarks_json"]) if fr["landmarks_json"] else None,
+                        embedding=json.loads(fr["embedding_json"]) if fr["embedding_json"] else None,
+                        det_score=fr["det_score"],
+                        age=fr["age"],
+                        gender=fr["gender"],
+                        model_name=fr["model_name"],
+                        detected_at=_parse_dt(fr["detected_at"]),
                     )
                 )
 
@@ -313,12 +386,16 @@ class PhotoIndexDB:
         )
         # Load exif
         exif_row = conn.execute(
-            "SELECT raw_json FROM enrich_exif WHERE asset_id = ?", (row["asset_id"],)
+            "SELECT raw_json, structured_json FROM enrich_exif WHERE asset_id = ?", (row["asset_id"],)
         ).fetchone()
         if exif_row:
             raw = json.loads(exif_row["raw_json"]) if exif_row["raw_json"] else {}
+            structured = json.loads(exif_row["structured_json"]) if exif_row["structured_json"] else {}
             from .models import ExifMetadata
-            asset.exif = ExifMetadata(raw=raw)
+            if structured:
+                asset.exif = ExifMetadata(**structured, raw=raw)
+            else:
+                asset.exif = ExifMetadata(raw=raw)
 
         # Load vlm
         vlm_row = conn.execute(
@@ -344,6 +421,27 @@ class PhotoIndexDB:
                     label=er["label"],
                     confidence=er["confidence"],
                     source=er["source"],
+                )
+            )
+
+        # Load faces
+        face_rows = conn.execute(
+            "SELECT * FROM enrich_faces WHERE asset_id = ?", (row["asset_id"],)
+        ).fetchall()
+        for fr in face_rows:
+            from .models import FaceEmbedding
+            asset.face_embeddings.append(
+                FaceEmbedding(
+                    id=UUID(fr["id"]) if fr["id"] else None,
+                    asset_id=UUID(fr["asset_id"]) if fr["asset_id"] else None,
+                    bbox=json.loads(fr["bbox_json"]) if fr["bbox_json"] else None,
+                    landmarks=json.loads(fr["landmarks_json"]) if fr["landmarks_json"] else None,
+                    embedding=json.loads(fr["embedding_json"]) if fr["embedding_json"] else None,
+                    det_score=fr["det_score"],
+                    age=fr["age"],
+                    gender=fr["gender"],
+                    model_name=fr["model_name"],
+                    detected_at=_parse_dt(fr["detected_at"]),
                 )
             )
 

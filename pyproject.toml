@@ -38,3 +38,6 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["photo_indexer*"]
+
+[tool.setuptools]
+packages = ["photo_indexer"]

@@ -76,7 +76,7 @@ class ExifMetadata(BaseModel):
     artist: Optional[str] = None
     copyright: Optional[str] = None
     image_description: Optional[str] = None
-    keywords: Optional[str] = None
+    keywords: Optional[List[str]] = None
     rating: Optional[int] = None
     lens_model: Optional[str] = None
     focal_length: Optional[float] = None
@@ -114,6 +114,7 @@ class Asset(BaseModel):
     exif: Optional[ExifMetadata] = None
     vlm: Optional["VLMResult"] = None
     ner_entities: List["NEREntity"] = Field(default_factory=list)
+    face_embeddings: List["FaceEmbedding"] = Field(default_factory=list)
     sidecar_status: Optional[SidecarStatus] = None
     sidecar_path: Optional[str] = None
     error_message: Optional[str] = None
@@ -151,6 +152,24 @@ class NEREntity(BaseModel):
     source: str = "vlm"  # vlm, exif, xmp
     start_char: Optional[int] = None
     end_char: Optional[int] = None
+
+    class Config:
+        use_enum_values = True
+
+
+class FaceEmbedding(BaseModel):
+    """Face embedding extracted from an image using InsightFace."""
+
+    id: UUID = Field(default_factory=uuid4)
+    asset_id: Optional[UUID] = None  # Reference to parent asset
+    bbox: Optional[List[float]] = None  # [x1, y1, x2, y2] in image coordinates
+    landmarks: Optional[List[List[float]]] = None  # [[x, y], ...] landmark points
+    embedding: Optional[List[float]] = None  # 512-dim face embedding vector
+    det_score: Optional[float] = None  # Detection confidence score
+    age: Optional[int] = None  # Estimated age
+    gender: Optional[int] = None  # 0=female, 1=male
+    model_name: str = "buffalo_l"  # InsightFace model used
+    detected_at: Optional[datetime] = None
 
     class Config:
         use_enum_values = True
