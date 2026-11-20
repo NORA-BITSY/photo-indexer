@@ -15,6 +15,10 @@ Local-first stack to export photos from iOS/Android/cloud sources, normalize the
 - `sql/enrich_schema.sql` — companion schema for raw metadata, normalized core fields, VLM results, faces, and sidecar tracking
 - `scripts/exiftool_dump.sh` — full ExifTool metadata extraction to JSON/JSONL
 - `scripts/write_xmp_sidecar.sh` — safe, non-destructive XMP sidecar writer for selected enrichment fields
+- `scripts/backup.sh` — backup database, staging, config with 7-day retention
+- `scripts/batch_index.sh` — scheduled indexing runner for systemd timer
+- `scripts/photo-indexer-index.service` / `.timer` — systemd units for automated indexing
+- `scripts/icloud_auth_and_sync.sh` / `icloud_auth_vm.sh` / `sync_icloud_to_gcp.sh` — iCloud sync helpers
 
 ## Quick start
 1. **Prepare storage paths** (adjust in `.env`):
@@ -63,6 +67,101 @@ Then add as Immich External Library and/or upload/import per Immich docs. Keep o
   ./scripts/write_xmp_sidecar.sh /path/to/photo.jpg --description "..." --keywords "person,beach,sunset"
   ```
   Log outcomes in `enrich.asset_sidecar` (`written|skipped_unsafe|error`).
+
+## Face recognition (CLI)
+
+Manage known persons and match detected faces:
+
+```bash
+# Create a known person with face embedding (JSON array of 512 floats)
+photo-indexer person create --name "John Doe" --embedding-file embedding.json
+
+# List all known persons
+photo-indexer person list
+
+# Get person details
+photo-indexer person get --name "John Doe"
+
+# Match faces in a specific asset to known persons
+photo-indexer match-faces --asset-id <asset-uuid> --threshold 0.6
+
+# Match faces in ALL assets and auto-link
+photo-indexer match-faces --all --threshold 0.6
+
+# Show all faces matched to a person
+photo-indexer person-faces --name "John Doe"
+```
+
+Face embeddings are 512-dimensional vectors from InsightFace (`buffalo_l` model). Matching uses cosine similarity with configurable threshold (default 0.6).
+
+## Tagging system (CLI)
+
+Add, remove, and query tags on assets:
+
+```bash
+# Add tags to an asset
+photo-indexer tag add --asset-id <uuid> --tag "sunset" --tag "beach"
+
+# Remove a tag
+photo-indexer tag remove --asset-id <uuid> --tag "beach"
+
+# List tags on an asset
+photo-indexer tag list --asset-id <uuid>
+
+# Find assets by tag
+photo-indexer tags find --tag "sunset" --limit 50
+
+# Bulk import tags from TSV file (asset_id<TAB>tag1,tag2,tag3)
+photo-indexer tag-import --file tags.tsv
+```
+
+Tags are stored in `enrich_tags` table with source tracking (`manual`, `file`, etc.).
+
+## Prometheus metrics & monitoring
+
+Enable metrics server for scraping:
+
+```bash
+# Start CLI with metrics on port 9090
+photo-indexer --metrics-port 9090 index /path/to/photos
+```
+
+Exposed metrics (prefix `photo_indexer_`):
+- **Counters:** `indexed_total`, `vlm_analyzed_total`, `sidecar_written_total`, `faces_detected_total`, `errors_total`
+- **Gauges:** `assets_indexed`, `db_size_bytes`
+- **Histograms:** `index_duration_seconds`, `vlm_analyze_duration_seconds`
+
+Monitoring stack includes:
+- **Grafana dashboard** (`monitoring/grafana/photo-indexer.json`) — assets, rate, latency, errors, DB size
+- **Alertmanager rules** (`monitoring/alerts/rules.yml`) — failure rate, DB growth, no activity
+- **Logrotate config** (`monitoring/logrotate/photo-indexer`) — daily rotation, 7-day retention
+
+Install Prometheus client: `pip install photo-indexer[monitoring]`
+
+## Backup & automation
+
+```bash
+# Manual backup (7-day retention by default)
+./scripts/backup.sh [/custom/backup/dir]
+
+# Scheduled indexing via systemd (install service + timer)
+sudo cp scripts/photo-indexer-index.service /etc/systemd/system/
+sudo cp scripts/photo-indexer-index.timer /etc/systemd/system/
+sudo systemctl enable --now photo-indexer-index.timer
+```
+
+## iCloud sync helpers
+
+```bash
+# Authenticate icloudpd (interactive, handles 2FA)
+./scripts/icloud_auth_and_sync.sh
+
+# Or use VM-based auth for headless servers
+./scripts/icloud_auth_vm.sh
+
+# Sync from iCloud to GCP bucket
+./scripts/sync_icloud_to_gcp.sh
+```
 
 ## Caveats
 - Verify/align `docker-compose.yml` with the **current Immich release** (DB image/vector extensions/env vars/ML config evolve). Pin image digests in production.
