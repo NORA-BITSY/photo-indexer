@@ -1,0 +1,65 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Photo Indexer",
+    "tags": ["photo-indexer", "monitoring"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "type": "stat",
+        "title": "Assets Indexed",
+        "targets": [
+          {
+            "expr": "photo_indexer_assets_indexed",
+            "legendFormat": "{{asset}} assets"
+          }
+        ]
+      },
+      {
+        "type": "graph",
+        "title": "Index Rate",
+        "targets": [
+          {
+            "expr": "rate(photo_indexer_indexed_total[5m])",
+            "legendFormat": "{{status}}"
+          }
+        ]
+      },
+      {
+        "type": "graph",
+        "title": "Index Duration",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(photo_indexer_index_duration_seconds_bucket[5m]))",
+            "legendFormat": "p95"
+          }
+        ]
+      },
+      {
+        "type": "graph",
+        "title": "Errors",
+        "targets": [
+          {
+            "expr": "rate(photo_indexer_errors_total[5m])",
+            "legendFormat": "{{command}}"
+          }
+        ]
+      },
+      {
+        "type": "graph",
+        "title": "DB Size",
+        "targets": [
+          {
+            "expr": "photo_indexer_db_size_bytes",
+            "legendFormat": "bytes"
+          }
+        ]
+      }
+    ],
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "refresh": "30s"
+  }
+}

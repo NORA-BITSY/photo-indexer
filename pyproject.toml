@@ -35,9 +35,5 @@ dev = [
     "mypy>=1.0",
 ]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["photo_indexer*"]
-
 [tool.setuptools]
 packages = ["photo_indexer"]

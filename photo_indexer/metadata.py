@@ -316,6 +316,7 @@ class DBRecord:
     vlm_model: Optional[str]
     ner_entities_json: str
     face_embeddings_json: str
+    tags_json: str
     sidecar_status: Optional[str]
     enriched_at: str
 
@@ -348,6 +349,7 @@ def asset_to_record(asset: Asset) -> DBRecord:
         vlm_model=asset.vlm.model if asset.vlm else None,
         ner_entities_json=json.dumps([e.model_dump() for e in asset.ner_entities], default=str),
         face_embeddings_json=json.dumps([e.model_dump() for e in asset.face_embeddings], default=str),
+        tags_json=json.dumps(asset.tags),
         sidecar_status=asset.sidecar_status.value if hasattr(asset.sidecar_status, "value") else asset.sidecar_status,
         enriched_at=datetime.utcnow().isoformat(),
     )

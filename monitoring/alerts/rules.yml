@@ -1,0 +1,38 @@
+groups:
+  - name: photo_indexer_alerts
+    rules:
+      - alert: PhotoIndexerExtractionFailureRate
+        expr: rate(photo_indexer_errors_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Photo indexer extraction failure rate elevated"
+          description: "Error rate is {{ $value }} errors/sec over the last 5 minutes."
+
+      - alert: PhotoIndexerExtractionFailureCritical
+        expr: rate(photo_indexer_errors_total[5m]) > 1.0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Photo indexer extraction failure rate critical"
+          description: "Error rate is {{ $value }} errors/sec over the last 5 minutes."
+
+      - alert: PhotoIndexerDBSizeGrowth
+        expr: deriv(photo_indexer_db_size_bytes[1h]) > 1073741824
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Photo indexer database growing rapidly"
+          description: "DB size increased by more than 1GB in the last hour."
+
+      - alert: PhotoIndexerNoIndexingActivity
+        expr: absent(photo_indexer_indexed_total)
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No indexing activity detected"
+          description: "No assets have been indexed in the last 30 minutes."

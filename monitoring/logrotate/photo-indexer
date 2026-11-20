@@ -1,0 +1,13 @@
+/var/log/photo-indexer/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 644 photo-indexer photo-indexer
+    sharedscripts
+    postrotate
+        systemctl reload photo-indexer-index.service >/dev/null 2>&1 || true
+    endscript
+}

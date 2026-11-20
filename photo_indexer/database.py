@@ -4,14 +4,14 @@ Supports SQLite (default, local-first) and PostgreSQL (via Immich instance).
 Schema mirrors sql/enrich_schema.sql.
 """
 
-from __future__ import annotations
-
 import json
+import math
 import sqlite3
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator, List, Optional, Union
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 from uuid import UUID
 
 from .metadata import DBRecord, asset_to_record
@@ -118,7 +118,40 @@ class PhotoIndexDB:
                     ON enrich_assets(file_path);
                 CREATE INDEX IF NOT EXISTS idx_enrich_assets_sha
                     ON enrich_assets(content_sha256);
-                """
+
+                CREATE TABLE IF NOT EXISTS enrich_tags (
+                    id            TEXT PRIMARY KEY,
+                    asset_id      TEXT NOT NULL,
+                    tag_name      TEXT NOT NULL,
+                    source        TEXT DEFAULT 'manual',
+                    FOREIGN KEY (asset_id) REFERENCES enrich_assets(asset_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_enrich_tags_asset
+                    ON enrich_tags(asset_id);
+                CREATE INDEX IF NOT EXISTS idx_enrich_tags_name
+                    ON enrich_tags(tag_name);
+
+                CREATE TABLE IF NOT EXISTS enrich_persons (
+                    id            TEXT PRIMARY KEY,
+                    name          TEXT NOT NULL UNIQUE,
+                    embedding_json TEXT NOT NULL,
+                    created_at    TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS enrich_face_matches (
+                    id            TEXT PRIMARY KEY,
+                    face_id       TEXT NOT NULL,
+                    person_id     TEXT NOT NULL,
+                    similarity    REAL NOT NULL,
+                    matched_at    TEXT,
+                    FOREIGN KEY (face_id) REFERENCES enrich_faces(id) ON DELETE CASCADE,
+                    FOREIGN KEY (person_id) REFERENCES enrich_persons(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_enrich_face_matches_face
+                    ON enrich_face_matches(face_id);
+                CREATE INDEX IF NOT EXISTS idx_enrich_face_matches_person
+                    ON enrich_face_matches(person_id);
+"""
             )
 
     @contextmanager
@@ -170,8 +203,8 @@ class PhotoIndexDB:
             self._upsert_exif(conn, record)
             self._upsert_vlm(conn, record)
             self._upsert_entities(conn, record)
-            self._upsert_faces(conn, record)
             self._upsert_sidecar(conn, record)
+            self._upsert_tags(conn, record)
 
     def _upsert_exif(self, conn: sqlite3.Connection, record: DBRecord) -> None:
         conn.execute(
@@ -271,6 +304,26 @@ class PhotoIndexDB:
             (record.asset_id, None, record.sidecar_status),
         )
 
+    def _upsert_tags(self, conn: sqlite3.Connection, record: DBRecord) -> None:
+        conn.execute("DELETE FROM enrich_tags WHERE asset_id = ?", (record.asset_id,))
+        try:
+            tags = json.loads(record.tags_json)
+        except (json.JSONDecodeError, TypeError):
+            tags = []
+        for tag in tags:
+            conn.execute(
+                """
+                INSERT INTO enrich_tags
+                (id, asset_id, tag_name, source)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    record.asset_id,
+                    tag,
+                    "manual",
+                ),
+            )
     def get(self, asset_id: str) -> Optional[Asset]:
         """Retrieve an asset by ID with all enrichment data."""
         with self._connect() as conn:
@@ -350,6 +403,23 @@ class PhotoIndexDB:
                         gender=fr["gender"],
                         model_name=fr["model_name"],
                         detected_at=_parse_dt(fr["detected_at"]),
+                    )
+                )
+
+
+            # Load tags
+            tag_rows = conn.execute(
+                "SELECT * FROM enrich_tags WHERE asset_id = ?", (asset_id,)
+            ).fetchall()
+            for tr in tag_rows:
+                asset.ner_entities.append(
+                    NEREntity(
+                        id=UUID(tr["id"]) if tr["id"] else None,
+                        text=tr["tag_name"],
+                        entity_type=EntityType.FACE,
+                        label=tr["tag_name"],
+                        confidence=1.0,
+                        source=tr["source"],
                     )
                 )
 
@@ -466,4 +536,282 @@ class PhotoIndexDB:
             cur = conn.execute(
                 "DELETE FROM enrich_assets WHERE asset_id = ?", (asset_id,)
             )
-            return cur.rowcount > 0
+
+    # Face Recognition Methods
+
+    def create_person(self, name: str, embedding: List[float]) -> str:
+        """Create a known person with their face embedding.
+        
+        Args:
+            name: Person's name (must be unique)
+            embedding: Face embedding vector
+            
+        Returns:
+            person_id: UUID of the created person
+        """
+        person_id = str(uuid.uuid4())
+        embedding_json = json.dumps(embedding)
+        created_at = datetime.utcnow().isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO enrich_persons (id, name, embedding_json, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (person_id, name, embedding_json, created_at),
+            )
+        return person_id
+
+    def get_person(self, person_id: str) -> Optional[Dict]:
+        """Get a person by their ID."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM enrich_persons WHERE id = ?", (person_id,)
+            ).fetchone()
+            if row:
+                return dict(row)
+        return None
+
+    def get_person_by_name(self, name: str) -> Optional[Dict]:
+        """Get a person by their name."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM enrich_persons WHERE name = ?", (name,)
+            ).fetchone()
+            if row:
+                return dict(row)
+        return None
+
+    def list_persons(self) -> List[Dict]:
+        """List all known persons."""
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM enrich_persons ORDER BY created_at DESC").fetchall()
+            return [dict(row) for row in rows]
+
+    def _cosine_similarity(self, emb1: List[float], emb2: List[float]) -> float:
+        """Compute cosine similarity between two embeddings."""
+        dot = sum(a * b for a, b in zip(emb1, emb2))
+        norm1 = math.sqrt(sum(a * a for a in emb1))
+        norm2 = math.sqrt(sum(b * b for b in emb2))
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+        return dot / (norm1 * norm2)
+
+    def match_face_to_person(
+        self, face_embedding: List[float], threshold: float = 0.6
+    ) -> Optional[Tuple[str, float]]:
+        """Match a face embedding against all known persons using cosine similarity.
+        
+        Args:
+            face_embedding: Face embedding vector to match
+            threshold: Minimum cosine similarity threshold (default 0.6)
+            
+        Returns:
+            Tuple of (person_id, similarity) if match found, None otherwise
+        """
+        persons = self.list_persons()
+        best_match = None
+        best_similarity = 0.0
+        
+        for person in persons:
+            person_embedding = json.loads(person["embedding_json"])
+            similarity = self._cosine_similarity(face_embedding, person_embedding)
+            if similarity > best_similarity and similarity >= threshold:
+                best_similarity = similarity
+                best_match = person["id"]
+        
+        if best_match:
+            return (best_match, best_similarity)
+        return None
+
+    def match_faces_in_asset(
+        self, asset_id: str, threshold: float = 0.6
+    ) -> List[Dict]:
+        """Match all faces in an asset to known persons.
+        
+        Args:
+            asset_id: Asset ID to match faces from
+            threshold: Minimum cosine similarity threshold
+            
+        Returns:
+            List of match results with face_id, person_id, person_name, similarity
+        """
+        with self._connect() as conn:
+            face_rows = conn.execute(
+                "SELECT * FROM enrich_faces WHERE asset_id = ?", (asset_id,)
+            ).fetchall()
+        
+        matches = []
+        for face_row in face_rows:
+            face_embedding = json.loads(face_row["embedding_json"])
+            match = self.match_face_to_person(face_embedding, threshold)
+            if match:
+                person_id, similarity = match
+                person = self.get_person(person_id)
+                matches.append({
+                    "face_id": face_row["id"],
+                    "person_id": person_id,
+                    "person_name": person["name"] if person else None,
+                    "similarity": similarity,
+                })
+        return matches
+
+    def link_face_to_person(
+        self, face_id: str, person_id: str, similarity: float
+    ) -> None:
+        """Store a face-to-person match in enrich_face_matches.
+        
+        Args:
+            face_id: Face embedding ID
+            person_id: Known person ID
+            similarity: Cosine similarity score
+        """
+        match_id = str(uuid.uuid4())
+        matched_at = datetime.utcnow().isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO enrich_face_matches (id, face_id, person_id, similarity, matched_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (match_id, face_id, person_id, similarity, matched_at),
+            )
+
+    def get_faces_by_person(self, person_id: str) -> List[Dict]:
+        """Get all faces matched to a specific person.
+        
+        Args:
+            person_id: Known person ID
+            
+        Returns:
+            List of face records with match info
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT f.*, m.similarity, m.matched_at, p.name as person_name
+                FROM enrich_face_matches m
+                JOIN enrich_faces f ON m.face_id = f.id
+                JOIN enrich_persons p ON m.person_id = p.id
+                WHERE m.person_id = ?
+                ORDER BY m.matched_at DESC
+                """,
+                (person_id,)
+            )
+            return [dict(row) for row in rows]
+
+    # Tag management methods
+    def add_tag(self, asset_id: str, tag_name: str, source: str = "manual") -> bool:
+        """Add a tag to an asset."""
+        with self._connect() as conn:
+            # Check if asset exists
+            asset = conn.execute(
+                "SELECT 1 FROM enrich_assets WHERE asset_id = ?", (asset_id,)
+            ).fetchone()
+            if not asset:
+                return False
+            
+            # Check if tag already exists
+            existing = conn.execute(
+                "SELECT 1 FROM enrich_tags WHERE asset_id = ? AND tag_name = ?", 
+                (asset_id, tag_name)
+            ).fetchone()
+            if existing:
+                return False
+            
+            tag_id = str(uuid.uuid4())
+            conn.execute(
+                """
+                INSERT INTO enrich_tags (id, asset_id, tag_name, source)
+                VALUES (?, ?, ?, ?)
+                """,
+                (tag_id, asset_id, tag_name, source)
+            )
+            return True
+
+    def remove_tag(self, asset_id: str, tag_name: str) -> bool:
+        """Remove a tag from an asset."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM enrich_tags WHERE asset_id = ? AND tag_name = ?",
+                (asset_id, tag_name)
+            )
+            return cursor.rowcount > 0
+
+    def get_tags(self, asset_id: str) -> List[str]:
+        """Get all tags for an asset."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT tag_name FROM enrich_tags WHERE asset_id = ? ORDER BY tag_name",
+                (asset_id,)
+            ).fetchall()
+            return [row["tag_name"] for row in rows]
+
+    def find_assets_by_tag(self, tag_name: str, limit: int = 100, offset: int = 0) -> List[Asset]:
+        """Find all assets with a specific tag."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT a.* FROM enrich_assets a
+                JOIN enrich_tags t ON a.asset_id = t.asset_id
+                WHERE t.tag_name = ?
+                ORDER BY a.enriched_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (tag_name, limit, offset)
+            ).fetchall()
+            return [self._row_to_asset(r, conn) for r in rows]
+
+    def import_tags_from_file(self, file_path: str) -> int:
+        """Bulk import tags from a file.
+        
+        File format (TSV/CSV): asset_id\\ttag1,tag2,tag3 or path\\ttag1,tag2
+        
+        Returns:
+            Number of tags successfully imported
+        """
+        import csv
+        count = 0
+        with open(file_path, 'r') as f:
+            # Try to detect delimiter
+            sample = f.read(1024)
+            f.seek(0)
+            sniffer = csv.Sniffer()
+            delimiter = sniffer.sniff(sample).delimiter if sample else '\t'
+            f.seek(0)
+            reader = csv.reader(f, delimiter=delimiter)
+            for row in reader:
+                if len(row) < 2:
+                    continue
+                identifier = row[0].strip()
+                tags_str = row[1].strip()
+                
+                # Find asset by ID or path
+                asset_id = None
+                if '-' in identifier and len(identifier) > 30:  # Likely a UUID
+                    asset_row = self.db_path.parent / "test"
+                    with self._connect() as conn:
+                        asset_row = conn.execute(
+                            "SELECT asset_id FROM enrich_assets WHERE asset_id = ?", 
+                            (identifier,)
+                        ).fetchone()
+                        if asset_row:
+                            asset_id = asset_row["asset_id"]
+                else:
+                    # Try by path/filename
+                    with self._connect() as conn:
+                        asset_row = conn.execute(
+                            "SELECT asset_id FROM enrich_assets WHERE file_path LIKE ? OR file_name = ?", 
+                            (f"%{identifier}%", identifier)
+                        ).fetchone()
+                        if asset_row:
+                            asset_id = asset_row["asset_id"]
+                
+                if not asset_id:
+                    continue
+                
+                tags = [t.strip() for t in tags_str.split(',') if t.strip()]
+                for tag in tags:
+                    if self.add_tag(asset_id, tag, source="file"):
+                        count += 1
+        return count

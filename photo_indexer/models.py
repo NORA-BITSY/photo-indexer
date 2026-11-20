@@ -115,10 +115,10 @@ class Asset(BaseModel):
     vlm: Optional["VLMResult"] = None
     ner_entities: List["NEREntity"] = Field(default_factory=list)
     face_embeddings: List["FaceEmbedding"] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
     sidecar_status: Optional[SidecarStatus] = None
     sidecar_path: Optional[str] = None
     error_message: Optional[str] = None
-
     class Config:
         use_enum_values = True
 
