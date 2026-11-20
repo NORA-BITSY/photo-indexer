@@ -203,6 +203,7 @@ class PhotoIndexDB:
             self._upsert_exif(conn, record)
             self._upsert_vlm(conn, record)
             self._upsert_entities(conn, record)
+            self._upsert_faces(conn, record)
             self._upsert_sidecar(conn, record)
             self._upsert_tags(conn, record)
 
@@ -773,11 +774,8 @@ class PhotoIndexDB:
         import csv
         count = 0
         with open(file_path, 'r') as f:
-            # Try to detect delimiter
-            sample = f.read(1024)
-            f.seek(0)
-            sniffer = csv.Sniffer()
-            delimiter = sniffer.sniff(sample).delimiter if sample else '\t'
+            # Force tab delimiter for TSV files (more reliable than sniffer)
+            delimiter = '\t'
             f.seek(0)
             reader = csv.reader(f, delimiter=delimiter)
             for row in reader:
@@ -789,7 +787,6 @@ class PhotoIndexDB:
                 # Find asset by ID or path
                 asset_id = None
                 if '-' in identifier and len(identifier) > 30:  # Likely a UUID
-                    asset_row = self.db_path.parent / "test"
                     with self._connect() as conn:
                         asset_row = conn.execute(
                             "SELECT asset_id FROM enrich_assets WHERE asset_id = ?", 
