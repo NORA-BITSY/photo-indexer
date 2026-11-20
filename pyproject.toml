@@ -34,6 +34,9 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0",
 ]
+monitoring = [
+    "prometheus-client>=0.19",
+]
 
 [tool.setuptools]
 packages = ["photo_indexer"]
