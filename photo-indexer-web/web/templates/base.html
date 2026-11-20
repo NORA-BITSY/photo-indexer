@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Photo Indexer Web UI{% endblock %}</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            200: '#bae6fd',
+                            300: '#7dd3fc',
+                            400: '#38bdf8',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                            800: '#075985',
+                            900: '#0c4a6e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/htmx.org/dist/ext/response-targets.js"></script>
+    <script src="https://unpkg.com/htmx.org/dist/ext/json-enc.js"></script>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Custom styles -->
+    <link rel="stylesheet" href="/static/style.css">
+
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen" x-data="app()" x-init="init()">
+    <!-- Auth store -->
+    <div x-data="authStore()" x-init="checkAuth()"></div>
+
+    <!-- Job progress toast container -->
+    <div x-data="jobProgress()" x-init="connect()"></div>
+
+    <!-- Navigation -->
+    <nav class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50" x-show="authenticated">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <a href="/performers" class="flex items-center space-x-2">
+                        <i data-lucide="camera" class="w-8 h-8 text-primary-600"></i>
+                        <span class="text-xl font-bold text-gray-900 dark:text-white">Photo Indexer</span>
+                    </a>
+                </div>
+
+                <div class="hidden md:flex md:items-center md:space-x-8">
+                    <a href="/performers" class="nav-link">Performers</a>
+                    <a href="/faces" class="nav-link">Faces</a>
+                    <a href="/measurements" class="nav-link">Measurements</a>
+                    <a href="/tags" class="nav-link">Tags</a>
+                    <a href="/assets" class="nav-link">Assets</a>
+                    <a href="/jobs" class="nav-link">Jobs</a>
+                    <a href="/settings" class="nav-link">Settings</a>
+                </div>
+
+                <div class="flex items-center space-x-4">
+                    <span class="text-sm text-gray-500 dark:text-gray-400" x-text="username"></span>
+                    <button @click="logout()" class="btn btn-secondary btn-sm">Logout</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Mobile nav -->
+    <nav class="md:hidden bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky bottom-0 z-50" x-show="authenticated">
+        <div class="flex justify-around py-2">
+            <a href="/performers" class="nav-link-mobile flex flex-col items-center">
+                <i data-lucide="users" class="w-6 h-6"></i>
+                <span class="text-xs">Performers</span>
+            </a>
+            <a href="/faces" class="nav-link-mobile flex flex-col items-center">
+                <i data-lucide="eye" class="w-6 h-6"></i>
+                <span class="text-xs">Faces</span>
+            </a>
+            <a href="/assets" class="nav-link-mobile flex flex-col items-center">
+                <i data-lucide="image" class="w-6 h-6"></i>
+                <span class="text-xs">Assets</span>
+            </a>
+            <a href="/jobs" class="nav-link-mobile flex flex-col items-center">
+                <i data-lucide="activity" class="w-6 h-6"></i>
+                <span class="text-xs">Jobs</span>
+            </a>
+        </div>
+    </nav>
+
+    <!-- Main content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24 md:pb-8" x-show="authenticated">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Login redirect -->
+    <div x-show="!authenticated" x-cloak>
+        {% block login_content %}{% endblock %}
+    </div>
+
+    <!-- Toast container -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2" aria-live="polite"></div>
+
+    <!-- Modals container -->
+    <div id="modals"></div>
+
+    <script>
+        // Initialize Lucide icons
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+        });
+
+        // Re-initialize icons after HTMX swaps
+        document.body.addEventListener('htmx:afterSwap', () => {
+            lucide.createIcons();
+        });
+
+        // Global Alpine stores
+        document.addEventListener('alpine:init', () => {
+            // Auth store
+            Alpine.store('auth', {
+                token: localStorage.getItem('access_token') || null,
+                username: null,
+                get authenticated() { return !!this.token; },
+                async checkAuth() {
+                    if (this.token) {
+                        try {
+                            const resp = await fetch('/api/v1/auth/me', {
+                                headers: { 'Authorization': `Bearer ${this.token}` }
+                            });
+                            if (resp.ok) {
+                                const data = await resp.json();
+                                this.username = data.username;
+                            } else {
+                                this.logout();
+                            }
+                        } catch {
+                            this.logout();
+                        }
+                    }
+                },
+                login(token, username) {
+                    this.token = token;
+                    this.username = username;
+                    localStorage.setItem('access_token', token);
+                },
+                logout() {
+                    this.token = null;
+                    this.username = null;
+                    localStorage.removeItem('access_token');
+                    window.location.href = '/login';
+                },
+                getHeaders() {
+                    return this.token ? { 'Authorization': `Bearer ${this.token}` } : {};
+                }
+            });
+
+            // Job progress store with SSE
+            Alpine.store('jobs', {
+                connections: new Map(),
+                connect(jobId) {
+                    if (this.connections.has(jobId)) return;
+
+                    const evtSource = new EventSource(`/api/v1/jobs/${jobId}/stream`, {
+                        headers: Alpine.store('auth').getHeaders()
+                    });
+
+                    evtSource.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+                        this.showToast(data);
+                    };
+
+                    evtSource.onerror = () => {
+                        evtSource.close();
+                        this.connections.delete(jobId);
+                    };
+
+                    this.connections.set(jobId, evtSource);
+                },
+                disconnect(jobId) {
+                    const conn = this.connections.get(jobId);
+                    if (conn) {
+                        conn.close();
+                        this.connections.delete(jobId);
+                    }
+                },
+                showToast(data) {
+                    const container = document.getElementById('toast-container');
+                    if (!container) return;
+
+                    const toast = document.createElement('div');
+                    toast.className = `toast ${data.status === 'completed' ? 'toast-success' : data.status === 'failed' ? 'toast-error' : 'toast-info'}`;
+                    toast.innerHTML = `
+                        <div class="flex items-center space-x-3">
+                            <i data-lucide="${data.status === 'completed' ? 'check-circle' : data.status === 'failed' ? 'alert-circle' : 'loader-2 animate-spin'}" class="w-5 h-5"></i>
+                            <div>
+                                <p class="font-medium">Job ${data.job_id?.slice(0, 8)}</p>
+                                <p class="text-sm opacity-80">${data.message || data.progress !== undefined ? `${Math.round((data.progress || 0) * 100)}%` : ''}</p>
+                            </div>
+                        </div>
+                    `;
+                    container.appendChild(toast);
+                    lucide.createIcons();
+
+                    // Auto-remove after 5s for completed/failed
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        setTimeout(() => toast.remove(), 5000);
+                    }
+                }
+            });
+        });
+
+        // App component
+        function app() {
+            return {
+                authenticated: false,
+                username: null,
+                async init() {
+                    this.authenticated = Alpine.store('auth').authenticated;
+                    this.username = Alpine.store('auth').username;
+                    await Alpine.store('auth').checkAuth();
+                    this.authenticated = Alpine.store('auth').authenticated;
+                    this.username = Alpine.store('auth').username;
+                }
+            }
+        }
+
+        // Auth store component
+        function authStore() {
+            return {
+                token: null,
+                username: null,
+                async checkAuth() {
+                    this.token = localStorage.getItem('access_token');
+                    if (this.token) {
+                        try {
+                            const resp = await fetch('/api/v1/auth/me', {
+                                headers: { 'Authorization': `Bearer ${this.token}` }
+                            });
+                            if (resp.ok) {
+                                const data = await resp.json();
+                                this.username = data.username;
+                            } else {
+                                this.logout();
+                            }
+                        } catch {
+                            this.logout();
+                        }
+                    }
+                },
+                logout() {
+                    this.token = null;
+                    this.username = null;
+                    localStorage.removeItem('access_token');
+                    window.location.href = '/login';
+                }
+            }
+        }
+
+        // Job progress component
+        function jobProgress() {
+            return {
+                connect() {
+                    // Connect to any active jobs from URL or localStorage
+                    const activeJobs = JSON.parse(localStorage.getItem('active_jobs') || '[]');
+                    activeJobs.forEach(jobId => Alpine.store('jobs').connect(jobId));
+                }
+            }
+        }
+    </script>
+
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

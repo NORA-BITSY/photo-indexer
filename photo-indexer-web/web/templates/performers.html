@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+
+{% block title %}Performers - Photo Indexer{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-white">Performers</h1>
+            <p class="text-gray-500 dark:text-gray-400">Manage performer profiles and biometrics</p>
+        </div>
+        <button @click="showCreateModal = true" class="btn btn-primary">
+            <i data-lucide="plus" class="w-5 h-5 mr-2"></i>
+            Add Performer
+        </button>
+    </div>
+
+    <!-- Search and filters -->
+    <div class="flex flex-col sm:flex-row gap-4">
+        <div class="flex-1">
+            <label class="sr-only">Search performers</label>
+            <div class="relative">
+                <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400"></i>
+                <input type="text"
+                    x-model="searchQuery"
+                    @input.debounce.300ms="fetchPerformers()"
+                    placeholder="Search by name..."
+                    class="input pl-10 w-full">
+            </div>
+        </div>
+    </div>
+
+    <!-- Performers table -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Performer</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Aliases</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Assets</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Face Quality</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Body Type</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200 dark:divide-gray-700" id="performers-table">
+                    <template x-for="performer in performers" :key="performer.id">
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50" @click="loadDetail(performer.id)">
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="flex items-center">
+                                    <div class="w-10 h-10 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center mr-3">
+                                        <span class="text-primary-700 dark:text-primary-300 font-medium" x-text="performer.name.charAt(0).toUpperCase()"></span>
+                                    </div>
+                                    <div>
+                                        <div class="text-sm font-medium text-gray-900 dark:text-white" x-text="performer.name"></div>
+                                        <div class="text-sm text-gray-500 dark:text-gray-400" x-text="'ID: ' + performer.id.slice(0, 8) + '...'"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="text-sm text-gray-500 dark:text-gray-400" x-text="performer.aliases_json ? JSON.parse(performer.aliases_json).join(', ') : '—'"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="text-sm text-gray-900 dark:text-white" x-text="performer.asset_count || 0"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="flex items-center">
+                                    <div class="w-24 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mr-2">
+                                        <div class="h-full bg-primary-500" :style="'width: ' + (performer.face_embedding_quality || 0) * 100 + '%'"></div>
+                                    </div>
+                                    <span class="text-sm text-gray-500 dark:text-gray-400" x-text="Math.round((performer.face_embedding_quality || 0) * 100) + '%'"></span>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                                    :class="performer.body_type ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'"
+                                    x-text="performer.body_type || '—'"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                                <button @click.stop="loadDetail(performer.id)" class="btn btn-secondary btn-sm">
+                                    <i data-lucide="eye" class="w-4 h-4"></i>
+                                </button>
+                                <button @click.stop="editPerformer(performer)" class="btn btn-secondary btn-sm">
+                                    <i data-lucide="edit" class="w-4 h-4"></i>
+                                </button>
+                                <button @click.stop="deletePerformer(performer.id)" class="btn btn-danger btn-sm">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <div class="text-sm text-gray-500 dark:text-gray-400">
+                Showing <span x-text="offset + 1"></span> to <span x-text="Math.min(offset + limit, total)"></span> of <span x-text="total"></span> performers
+            </div>
+            <div class="flex space-x-2">
+                <button @click="prevPage()" :disabled="offset === 0" class="btn btn-secondary btn-sm">Previous</button>
+                <button @click="nextPage()" :disabled="offset + limit >= total" class="btn btn-secondary btn-sm">Next</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Detail panel (slide-over) -->
+    <div x-show="detailId" x-transition class="fixed inset-0 z-50 overflow-y-auto" @click.self="closeDetail()">
+        <div class="flex min-h-full items-center justify-center p-4">
+            <div class="fixed inset-0 bg-black/50" @click="closeDetail()"></div>
+            <div class="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+                    <h2 class="text-lg font-semibold">Performer Details</h2>
+                    <button @click="closeDetail()" class="text-gray-400 hover:text-gray-500">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+                <div class="flex-1 overflow-y-auto p-4" id="performer-detail" hx-get="/performers/partials/detail" hx-trigger="detailChanged" hx-vals='{"id": detailId}'>
+                    Loading...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create/Edit modal -->
+    <div x-show="showCreateModal" x-transition class="fixed inset-0 z-50 overflow-y-auto" @click.self="showCreateModal = false">
+        <div class="flex min-h-full items-center justify-center p-4">
+            <div class="fixed inset-0 bg-black/50" @click="showCreateModal = false"></div>
+            <div class="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
+                <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+                    <h2 class="text-lg font-semibold" x-text="editingPerformer ? 'Edit Performer' : 'Create Performer'"></h2>
+                    <button @click="showCreateModal = false" class="text-gray-400 hover:text-gray-500">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+                <form @submit.prevent="savePerformer()" class="p-4 space-y-4">
+                    <input type="hidden" name="id" x-model="form.id">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Name</label>
+                        <input type="text" name="name" x-model="form.name" required
+                            class="mt-1 input w-full" placeholder="Performer name">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Aliases (comma-separated)</label>
+                        <input type="text" name="aliases" x-model="form.aliases"
+                            class="mt-1 input w-full" placeholder="alias1, alias2">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Body Type</label>
+                        <select name="body_type" x-model="form.body_type" class="mt-1 input w-full">
+                            <option value="">—</option>
+                            <option value="ectomorph">Ectomorph</option>
+                            <option value="mesomorph">Mesomorph</option>
+                            <option value="endomorph">Endomorph</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Height (cm)</label>
+                            <input type="number" name="height_cm" x-model.number="form.height_cm" step="0.1"
+                                class="mt-1 input w-full" placeholder="175.5">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Weight (kg)</label>
+                            <input type="number" name="weight_kg_estimate" x-model.number="form.weight_kg_estimate" step="0.1"
+                                class="mt-1 input w-full" placeholder="70.0">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Notes</label>
+                        <textarea name="notes" x-model="form.notes" rows="3" class="mt-1 input w-full"></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3 pt-4">
+                        <button type="button" @click="showCreateModal = false" class="btn btn-secondary">Cancel</button>
+                        <button type="submit" class="btn btn-primary" x-text="editingPerformer ? 'Update' : 'Create'"></button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    function performerPage() {
+        return {
+            performers: [],
+            total: 0,
+            limit: 50,
+            offset: 0,
+            searchQuery: '',
+            detailId: null,
+            showCreateModal: false,
+            editingPerformer: null,
+            form: { name: '', aliases: '', body_type: '', height_cm: null, weight_kg_estimate: null, notes: '' },
+
+            async init() {
+                await this.fetchPerformers();
+            },
+
+            async fetchPerformers() {
+                const params = new URLSearchParams({
+                    limit: this.limit,
+                    offset: this.offset,
+                });
+                if (this.searchQuery) params.append('search', this.searchQuery);
+
+                const resp = await fetch(`/api/v1/performers?${params}`, {
+                    headers: Alpine.store('auth').getHeaders()
+                });
+                const data = await resp.json();
+                this.performers = data.performers || [];
+                this.total = data.total || this.performers.length;
+            },
+
+            loadDetail(id) {
+                this.detailId = id;
+                this.$dispatch('detailChanged', { id });
+            },
+
+            closeDetail() {
+                this.detailId = null;
+            },
+
+            editPerformer(performer) {
+                this.editingPerformer = performer;
+                this.form = {
+                    id: performer.id,
+                    name: performer.name,
+                    aliases: performer.aliases_json ? JSON.parse(performer.aliases_json).join(', ') : '',
+                    body_type: performer.body_type || '',
+                    height_cm: performer.height_cm || null,
+                    weight_kg_estimate: performer.weight_kg_estimate || null,
+                    notes: performer.notes || '',
+                };
+                this.showCreateModal = true;
+            },
+
+            async savePerformer() {
+                const isEdit = !!this.form.id;
+                const url = isEdit ? `/api/v1/performers/${this.form.id}` : '/api/v1/performers';
+                const method = isEdit ? 'PATCH' : 'POST';
+
+                const payload = {
+                    name: this.form.name,
+                    aliases: this.form.aliases.split(',').map(s => s.trim()).filter(Boolean),
+                    body_type: this.form.body_type || null,
+                    height_cm: this.form.height_cm,
+                    weight_kg_estimate: this.form.weight_kg_estimate,
+                    notes: this.form.notes || null,
+                };
+
+                const resp = await fetch(url, {
+                    method,
+                    headers: { ...Alpine.store('auth').getHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+
+                if (resp.ok) {
+                    this.showCreateModal = false;
+                    this.form = { name: '', aliases: '', body_type: '', height_cm: null, weight_kg_estimate: null, notes: '' };
+                    this.editingPerformer = null;
+                    await this.fetchPerformers();
+                } else {
+                    alert('Failed to save performer');
+                }
+            },
+
+            async deletePerformer(id) {
+                if (!confirm('Delete this performer?')) return;
+                const resp = await fetch(`/api/v1/performers/${id}`, {
+                    method: 'DELETE',
+                    headers: Alpine.store('auth').getHeaders(),
+                });
+                if (resp.ok) {
+                    await this.fetchPerformers();
+                }
+            },
+
+            prevPage() {
+                if (this.offset >= this.limit) {
+                    this.offset -= this.limit;
+                    this.fetchPerformers();
+                }
+            },
+
+            nextPage() {
+                if (this.offset + this.limit < this.total) {
+                    this.offset += this.limit;
+                    this.fetchPerformers();
+                }
+            },
+        }
+    }
+</script>
+{% endblock %}

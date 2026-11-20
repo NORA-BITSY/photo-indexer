@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+
+{% block title %}Measurements - Photo Indexer{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-white">Body Measurements</h1>
+            <p class="text-gray-500 dark:text-gray-400">Browse and analyze anthropometric measurements</p>
+        </div>
+        <button @click="recomputeMeasurements()" class="btn btn-primary">
+            <i data-lucide="refresh-cw" class="w-5 h-5 mr-2"></i>
+            Recompute
+        </button>
+    </div>
+
+    <!-- Summary cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" x-show="summary">
+        <template x-for="(stats, type) in summary" :key="type">
+            <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400" x-text="type.replace(/_/g, ' ')"></h3>
+                <div class="mt-2 space-y-1">
+                    <div class="text-2xl font-bold text-gray-900 dark:text-white" x-text="stats.count"></div>
+                    <div class="text-xs text-gray-500" x-text="'Mean: ' + stats.mean.toFixed(1) + ' ' + (stats.unit || 'cm')"></div>
+                    <div class="text-xs text-gray-500" x-text="'Range: ' + stats.min.toFixed(1) + ' - ' + stats.max.toFixed(1)"></div>
+                    <div class="text-xs text-gray-500" x-text="'Std: ' + stats.std.toFixed(1)"></div>
+                </div>
+            </div>
+        </template>
+    </div>
+
+    <!-- Chart -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4" x-show="chartType">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold">Distribution</h2>
+            <select x-model="chartType" class="input w-48">
+                <option value="">Select measurement type</option>
+                <template x-for="type in chartTypes" :key="type">
+                    <option :value="type" x-text="type.replace(/_/g, ' ')"></option>
+                </template>
+            </select>
+        </div>
+        <div class="h-64">
+            <canvas id="measurementChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+        <div class="grid grid-cols-1 sm:grid-cols-5 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Measurement Type</label>
+                <select x-model="filters.measurement_type" @change="fetchMeasurements()" class="input w-full">
+                    <option value="">All types</option>
+                    <template x-for="type in chartTypes" :key="type">
+                        <option :value="type" x-text="type.replace(/_/g, ' ')"></option>
+                    </template>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Performer</label>
+                <input type="text" x-model="filters.performer_id" @input.debounce.300ms="fetchMeasurements()" placeholder="Performer ID..." class="input w-full">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Asset ID</label>
+                <input type="text" x-model="filters.asset_id" @input.debounce.300ms="fetchMeasurements()" placeholder="Asset ID..." class="input w-full">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Min Value</label>
+                <input type="number" x-model.number="filters.min_value" @change="fetchMeasurements()" step="0.1" class="input w-full" placeholder="Min">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Max Value</label>
+                <input type="number" x-model.number="filters.max_value" @change="fetchMeasurements()" step="0.1" class="input w-full" placeholder="Max">
+            </div>
+        </div>
+    </div>
+
+    <!-- Measurements table -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Value</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Unit</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Confidence</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Method</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Asset</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Performer</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                    <template x-for="m in measurements" :key="m.id">
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800 dark:bg-primary-900 dark:text-primary-200"
+                                    x-text="m.measurement_type.replace(/_/g, ' ')"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-white" x-text="m.value.toFixed(2)"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400" x-text="m.unit"></td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="w-24 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                    <div class="h-full bg-primary-500" :style="'width: ' + (m.confidence || 0) * 100 + '%'"></div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400" x-text="m.method"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400" x-text="(m.asset_id || '').slice(0, 8) + '...'"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400" x-text="(m.performer_id || '').slice(0, 8) + '...'"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400" x-text="m.computed_at ? new Date(m.computed_at).toLocaleDateString() : '—'"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <div class="text-sm text-gray-500" x-text="'Showing ' + (offset + 1) + ' to ' + Math.min(offset + limit, total) + ' of ' + total"></div>
+            <div class="flex space-x-2">
+                <button @click="prevPage()" :disabled="offset === 0" class="btn btn-secondary btn-sm">Previous</button>
+                <button @click="nextPage()" :disabled="offset + limit >= total" class="btn btn-secondary btn-sm">Next</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export buttons -->
+    <div class="flex space-x-4">
+        <button @click="exportCSV()" class="btn btn-secondary">
+            <i data-lucide="download" class="w-4 h-4 mr-2"></i> Export CSV
+        </button>
+        <button @click="exportJSON()" class="btn btn-secondary">
+            <i data-lucide="download" class="w-4 h-4 mr-2"></i> Export JSON
+        </button>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    function measurementsPage() {
+        return {
+            measurements: [],
+            total: 0,
+            limit: 100,
+            offset: 0,
+            summary: {},
+            chartTypes: [],
+            chartType: '',
+            chart: null,
+            filters: { measurement_type: '', performer_id: '', asset_id: '', min_value: null, max_value: null },
+
+            async init() {
+                await Promise.all([this.fetchMeasurements(), this.fetchSummary(), this.fetchTypes()]);
+            },
+
+            async fetchMeasurements() {
+                const params = new URLSearchParams({
+                    limit: this.limit,
+                    offset: this.offset,
+                });
+                Object.entries(this.filters).forEach(([k, v]) => {
+                    if (v !== null && v !== '') params.append(k, v);
+                }
+
+                const resp = await fetch(`/api/v1/measurements?${params}`, {
+                    headers: Alpine.store('auth').getHeaders()
+                });
+                const data = await resp.json();
+                this.measurements = data.measurements || [];
+                this.total = data.total || this.measurements.length;
+            },
+
+            async fetchSummary() {
+                const resp = await fetch('/api/v1/measurements/summary', {
+                    headers: Alpine.store('auth').getHeaders()
+                });
+                const data = await resp.json();
+                this.summary = data.summary || {};
+            },
+
+            async fetchTypes() {
+                const resp = await fetch('/api/v1/measurements/types', {
+                    headers: Alpine.store('auth').getHeaders()
+                });
+                const data = await resp.json();
+                this.chartTypes = data.types.map(t => t.value);
+            },
+
+            updateChart() {
+                if (!this.chartType) return;
+
+                const typeData = this.measurements.filter(m => m.measurement_type === this.chartType);
+                const values = typeData.map(m => m.value);
+
+                if (values.length === 0) return;
+
+                // Calculate histogram bins
+                const min = Math.min(...values);
+                const max = Math.max(...values);
+                const bins = 20;
+                const binWidth = (max - min) / bins;
+                const histogram = new Array(bins).fill(0);
+
+                values.forEach(v => {
+                    const bin = Math.min(Math.floor((v - min) / binWidth), bins - 1);
+                    histogram[bin]++;
+                });
+
+                const labels = [];
+                for (let i = 0; i < bins; i++) {
+                    const start = min + i * binWidth;
+                    const end = start + binWidth;
+                    labels.push(`${start.toFixed(1)}-${end.toFixed(1)}`);
+                }
+
+                if (this.chart) {
+                    this.chart.destroy();
+                }
+
+                const ctx = document.getElementById('measurementChart').getContext('2d');
+                this.chart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Count',
+                            data: histogram,
+                            backgroundColor: 'rgba(14, 165, 233, 0.6)',
+                            borderColor: 'rgba(14, 165, 233, 1)',
+                            borderWidth: 1,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { beginAtZero: true, title: { display: true, text: 'Count' } },
+                            x: { title: { display: true, text: this.chartType.replace(/_/g, ' ') } }
+                        }
+                    }
+                });
+            },
+
+            exportCSV() {
+                const params = new URLSearchParams({ format: 'csv', limit: 10000 });
+                Object.entries(this.filters).forEach(([k, v]) => {
+                    if (v !== null && v !== '') params.append(k, v);
+                });
+                window.open(`/api/v1/measurements/export?${params}`, '_blank');
+            },
+
+            exportJSON() {
+                const params = new URLSearchParams({ format: 'json', limit: 10000 });
+                Object.entries(this.filters).forEach(([k, v]) => {
+                    if (v !== null && v !== '') params.append(k, v);
+                });
+                window.open(`/api/v1/measurements/export?${params}`, '_blank');
+            },
+
+            recomputeMeasurements() {
+                // Open modal to select assets
+                alert('Select assets first, then use batch operations from Assets page');
+            },
+
+            prevPage() {
+                if (this.offset >= this.limit) {
+                    this.offset -= this.limit;
+                    this.fetchMeasurements();
+                }
+            },
+
+            nextPage() {
+                if (this.offset + this.limit < this.total) {
+                    this.offset += this.limit;
+                    this.fetchMeasurements();
+                }
+            },
+
+            // Watch chartType for changes
+            get chartTypeWatcher() {
+                return this.chartType;
+            },
+            set chartTypeWatcher(val) {
+                this.chartType = val;
+                this.$nextTick(() => this.updateChart());
+            }
+        }
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,442 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Photo Indexer{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div>
+        <h1 class="text-3xl font-bold text-gray-900 dark:text-white">Settings</h1>
+        <p class="text-gray-500 dark:text-gray-400">Configure Photo Indexer Web UI</p>
+    </div>
+
+    <!-- Tabs -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div class="border-b border-gray-200 dark:border-gray-700">
+            <nav class="flex -mb-px" role="tablist">
+                <button @click="activeTab = 'general'" role="tab" :class="tabClass('general')">General</button>
+                <button @click="activeTab = 'models'" role="tab" :class="tabClass('models')">Models</button>
+                <button @click="activeTab = 'jobs'" role="tab" :class="tabClass('jobs')">Jobs</button>
+                <button @click="activeTab = 'backup'" role="tab" :class="tabClass('backup')">Backup</button>
+                <button @click="activeTab = 'logs'" role="tab" :class="tabClass('logs')">Logs</button>
+                <button @click="activeTab = 'advanced'" role="tab" :class="tabClass('advanced')">Advanced</button>
+            </nav>
+        </div>
+
+        <div class="p-6 space-y-6">
+            <!-- General tab -->
+            <div x-show="activeTab === 'general'">
+                <h2 class="text-lg font-semibold mb-4">General Settings</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Web Username</label>
+                        <input type="text" x-model="settings.web_username" disabled class="input w-full bg-gray-100 dark:bg-gray-700" placeholder="admin">
+                        <p class="text-xs text-gray-500 mt-1">Set via WEB_USERNAME env var</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Database Path</label>
+                        <input type="text" x-model="settings.database_path" disabled class="input w-full bg-gray-100 dark:bg-gray-700">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Immich URL</label>
+                        <input type="text" x-model="settings.immich_url" disabled class="input w-full bg-gray-100 dark:bg-gray-700">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Ollama URL</label>
+                        <input type="text" x-model="settings.ollama_base_url" disabled class="input w-full bg-gray-100 dark:bg-gray-700">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Redis URL</label>
+                        <input type="text" x-model="settings.redis_url" disabled class="input w-full bg-gray-100 dark:bg-gray-700">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Media Roots</label>
+                        <input type="text" x-model="settings.media_roots" disabled class="input w-full bg-gray-100 dark:bg-gray-700">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Models tab -->
+            <div x-show="activeTab === 'models'">
+                <h2 class="text-lg font-semibold mb-4">Model Configuration</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">VLM Model</label>
+                        <select x-model="runtimeSettings.vlm_model" @change="saveSettings()" class="input w-full">
+                            <option value="llava">LLaVA</option>
+                            <option value="llava:13b">LLaVA 13B</option>
+                            <option value="llava:34b">LLaVA 34B</option>
+                            <option value="moondream">Moondream</option>
+                            <option value="bakllava">BakLLaVA</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Face Match Threshold</label>
+                        <input type="range" min="0.3" max="0.9" step="0.05" x-model.number="runtimeSettings.face_threshold" class="w-full mb-2">
+                        <span class="text-sm" x-text="runtimeSettings.face_threshold.toFixed(2)"></span>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Body Pose Complexity</label>
+                        <select x-model.number="runtimeSettings.body_complexity" @change="saveSettings()" class="input w-full">
+                            <option value="0">Lite (fast)</option>
+                            <option value="1">Full (balanced)</option>
+                            <option value="2">Heavy (accurate)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Job Timeout (seconds)</label>
+                        <input type="number" x-model.number="runtimeSettings.job_timeout" @change="saveSettings()" class="input w-full" min="60" max="7200">
+                    </div>
+                </div>
+
+                <!-- Model status -->
+                <div class="mt-8">
+                    <h3 class="text-md font-semibold mb-3">Model Files</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
+                            <div class="flex items-center justify-between">
+                                <span class="font-medium">face_landmarker.task</span>
+                                <span class="px-2 py-1 text-xs rounded-full"
+                                    :class="modelStatus.face_landmarker ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+                                    x-text="modelStatus.face_landmarker ? 'Found' : 'Missing'"></span>
+                            </div>
+                        </div>
+                        <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
+                            <div class="flex items-center justify-between">
+                                <span class="font-medium">pose_landmarker_heavy.task</span>
+                                <span class="px-2 py-1 text-xs rounded-full"
+                                    :class="modelStatus.pose_landmarker_heavy ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+                                    x-text="modelStatus.pose_landmarker_heavy ? 'Found' : 'Missing'"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Jobs tab -->
+            <div x-show="activeTab === 'jobs'">
+                <h2 class="text-lg font-semibold mb-4">Job Concurrency Settings</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">VLM Analyze</label>
+                        <input type="number" x-model.number="runtimeSettings.job_concurrency_vlm" @change="saveSettings()" class="input w-full" min="1" max="4">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Face Detection</label>
+                        <input type="number" x-model.number="runtimeSettings.job_concurrency_face" @change="saveSettings()" class="input w-full" min="1" max="8">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Body Pose</label>
+                        <input type="number" x-model.number="runtimeSettings.job_concurrency_body" @change="saveSettings()" class="input w-full" min="1" max="8">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Default</label>
+                        <input type="number" x-model.number="runtimeSettings.job_concurrency_default" @change="saveSettings()" class="input w-full" min="1" max="16">
+                    </div>
+                </div>
+
+                <div class="mt-8">
+                    <h3 class="text-md font-semibold mb-3">Active Jobs</h3>
+                    <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+                        <div class="grid grid-cols-3 gap-4 text-center">
+                            <div>
+                                <div class="text-3xl font-bold text-blue-600" x-text="jobCounts.running"></div>
+                                <div class="text-sm text-gray-500">Running</div>
+                            </div>
+                            <div>
+                                <div class="text-3xl font-bold text-yellow-600" x-text="jobCounts.pending"></div>
+                                <div class="text-sm text-gray-500">Pending</div>
+                            </div>
+                            <div>
+                                <div class="text-3xl font-bold text-green-600" x-text="jobCounts.completed"></div>
+                                <div class="text-sm text-gray-500">Completed</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Backup tab -->
+            <div x-show="activeTab === 'backup'">
+                <h2 class="text-lg font-semibold mb-4">Backup Management</h2>
+                <div class="flex space-x-4 mb-6">
+                    <button @click="createBackup()" :disabled="creatingBackup" class="btn btn-primary">
+                        <i data-lucide="database" class="w-4 h-4 mr-2"></i> Create Backup
+                    </button>
+                    <button @click="refreshBackups()" class="btn btn-secondary">
+                        <i data-lucide="refresh-cw" class="w-4 h-4 mr-2"></i> Refresh
+                    </button>
+                </div>
+
+                <div class="overflow-x-auto" x-show="backups.length > 0">
+                    <table class="w-full">
+                        <thead class="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Filename</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                            <template x-for="backup in backups" :key="backup.name">
+                                <tr>
+                                    <td class="px-6 py-4 font-mono text-sm" x-text="backup.name"></td>
+                                    <td class="px-6 py-4 text-sm text-gray-500" x-text="formatBytes(backup.size)"></td>
+                                    <td class="px-6 py-4 text-sm text-gray-500" x-text="new Date(backup.mtime * 1000).toLocaleString()"></td>
+                                    <td class="px-6 py-4">
+                                        <a :href="'/api/v1/system/backups/' + backup.name" class="btn btn-secondary btn-sm">Download</a>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-gray-500 text-center py-8" x-show="backups.length === 0">No backups found</p>
+            </div>
+
+            <!-- Logs tab -->
+            <div x-show="activeTab === 'logs'">
+                <h2 class="text-lg font-semibold mb-4">System Logs</h2>
+                <div class="flex space-x-4 mb-4">
+                    <label class="flex items-center">
+                        <input type="number" x-model.number="logLines" min="50" max="1000" step="50" class="input w-24 mr-2">
+                        <span class="text-sm">Lines</span>
+                    </label>
+                    <button @click="refreshLogs()" class="btn btn-secondary">
+                        <i data-lucide="refresh-cw" class="w-4 h-4 mr-2"></i> Refresh
+                    </button>
+                </div>
+                <div class="bg-black rounded-lg p-4 font-mono text-sm text-green-300 max-h-96 overflow-y-auto" x-show="logs.length > 0">
+                    <template x-for="line in logs" :key="line">
+                        <div class="whitespace-pre-wrap" x-text="line"></div>
+                    </template>
+                </div>
+                <p class="text-gray-500 text-center py-8" x-show="logs.length === 0">No logs available</p>
+            </div>
+
+            <!-- Advanced tab -->
+            <div x-show="activeTab === 'advanced'">
+                <h2 class="text-lg font-semibold mb-4">Advanced</h2>
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="text-md font-semibold mb-3">API Endpoints</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                            <div class="bg-gray-50 dark:bg-gray-700 rounded p-3 font-mono">
+                                <span class="text-primary-600">GET</span> /api/v1/performers
+                            </div>
+                            <div class="bg-gray-50 dark:bg-gray-700 rounded p-3 font-mono">
+                                <span class="text-primary-600">GET</span> /api/v1/faces
+                            </div>
+                            <div class="bg-gray-50 dark:bg-gray-700 rounded p-3 font-mono">
+                                <span class="text-primary-600">GET</span> /api/v1/measurements
+                            </div>
+                            <div class="bg-gray-50 dark:bg-gray-700 rounded p-3 font-mono">
+                                <span class="text-primary-600">GET</span> /api/v1/tags
+                            </div>
+                            <div class="bg-gray-50 dark:bg-gray-700 rounded p-3 font-mono">
+                                <span class="text-primary-600">GET</span> /api/v1/assets
+                            </div>
+                            <div class="bg-gray-50 dark:bg-gray-700 rounded p-3 font-mono">
+                                <span class="text-primary-600">GET</span> /api/v1/jobs
+                            </div>
+                            <div class="bg-gray-50 dark:bg-gray-700 rounded p-3 font-mono">
+                                <span class="text-primary-600">GET</span> /api/v1/immich
+                            </div>
+                            <div class="bg-gray-50 dark:bg-gray-700 rounded p-3 font-mono">
+                                <span class="text-primary-600">GET</span> /api/v1/system
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 class="text-md font-semibold mb-3">Documentation</h3>
+                        <div class="flex space-x-4">
+                            <a href="/docs" target="_blank" class="btn btn-primary">
+                                <i data-lucide="book-open" class="w-4 h-4 mr-2"></i> Swagger UI
+                            </a>
+                            <a href="/redoc" target="_blank" class="btn btn-secondary">
+                                <i data-lucide="file-text" class="w-4 h-4 mr-2"></i> ReDoc
+                            </a>
+                            <a href="/metrics" target="_blank" class="btn btn-secondary">
+                                <i data-lucide="bar-chart-2" class="w-4 h-4 mr-2"></i> Prometheus Metrics
+                            </a>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 class="text-md font-semibold mb-3">Environment Variables</h3>
+                        <p class="text-sm text-gray-500 mb-2">Key configuration is set via environment variables:</p>
+                        <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm text-green-300 overflow-x-auto">
+                            <pre x-text="envVars"></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    function settingsPage() {
+        return {
+            activeTab: 'general',
+            settings: {},
+            runtimeSettings: {},
+            modelStatus: {},
+            jobCounts: { running: 0, pending: 0, completed: 0 },
+            backups: [],
+            logs: [],
+            logLines: 100,
+            creatingBackup: false,
+            envVars: '',
+
+            tabClass(tab) {
+                return this.activeTab === tab
+                    ? 'px-4 py-2 text-sm font-medium text-primary-600 border-b-2 border-primary-600'
+                    : 'px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700';
+            },
+
+            async init() {
+                await Promise.all([
+                    this.fetchSettings(),
+                    this.fetchRuntimeSettings(),
+                    this.fetchModelStatus(),
+                    this.fetchJobCounts(),
+                    this.refreshBackups(),
+                    this.refreshLogs(),
+                    this.fetchEnvVars(),
+                ]);
+            },
+
+            async fetchSettings() {
+                const resp = await fetch('/api/v1/system/settings', {
+                    headers: Alpine.store('auth').getHeaders()
+                });
+                if (resp.ok) {
+                    this.settings = await resp.json();
+                }
+            },
+
+            async fetchRuntimeSettings() {
+                const resp = await fetch('/api/v1/system/settings', {
+                    headers: Alpine.store('auth').getHeaders()
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    this.runtimeSettings = {
+                        vlm_model: data.vlm_model || 'llava',
+                        face_threshold: data.face_threshold || 0.6,
+                        body_complexity: data.body_complexity || 1,
+                        job_timeout: data.job_timeout_seconds || 3600,
+                        job_concurrency_vlm: data.job_concurrency?.vlm || 1,
+                        job_concurrency_face: data.job_concurrency?.face || 2,
+                        job_concurrency_body: data.job_concurrency?.body || 2,
+                        job_concurrency_default: data.job_concurrency?.default || 4,
+                    };
+                }
+            },
+
+            async fetchModelStatus() {
+                this.modelStatus = {
+                    face_landmarker: true,
+                    pose_landmarker_heavy: true,
+                };
+            },
+
+            async fetchJobCounts() {
+                const resp = await fetch('/api/v1/jobs?limit=100', {
+                    headers: Alpine.store('auth').getHeaders()
+                });
+                if (resp.ok) {
+                    const jobs = await resp.json();
+                    this.jobCounts = {
+                        running: jobs.filter(j => j.status === 'running').length,
+                        pending: jobs.filter(j => j.status === 'pending').length,
+                        completed: jobs.filter(j => j.status === 'completed').length,
+                    };
+                }
+            },
+
+            async saveSettings() {
+                const resp = await fetch('/api/v1/system/settings', {
+                    method: 'PATCH',
+                    headers: { ...Alpine.store('auth').getHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.runtimeSettings),
+                });
+                if (resp.ok) {
+                    this.showToast('Settings saved');
+                }
+            },
+
+            async createBackup() {
+                this.creatingBackup = true;
+                const resp = await fetch('/api/v1/system/backup', {
+                    method: 'POST',
+                    headers: Alpine.store('auth').getHeaders(),
+                });
+                if (resp.ok) {
+                    const job = await resp.json();
+                    Alpine.store('jobs').connect(job.job_id);
+                }
+                this.creatingBackup = false;
+            },
+
+            async refreshBackups() {
+                const resp = await fetch('/api/v1/system/backups', {
+                    headers: Alpine.store('auth').getHeaders()
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    this.backups = data.backups || [];
+                }
+            },
+
+            async refreshLogs() {
+                const resp = await fetch(`/api/v1/system/logs?lines=${this.logLines}`, {
+                    headers: Alpine.store('auth').getHeaders()
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    this.logs = data.logs || [];
+                }
+            },
+
+            async fetchEnvVars() {
+                const keys = [
+                    'DATABASE_PATH', 'IMMICH_URL', 'OLLAMA_BASE_URL', 'VLM_MODEL',
+                    'REDIS_URL', 'WEB_USERNAME', 'MEDIA_ROOTS', 'MAX_UPLOAD_SIZE',
+                    'JOB_TIMEOUT_SECONDS', 'JOB_CONCURRENCY_VLM', 'JOB_CONCURRENCY_FACE',
+                    'JOB_CONCURRENCY_BODY', 'JOB_CONCURRENCY_DEFAULT',
+                ];
+                let output = '';
+                for (const key of keys) {
+                    const val = process.env[key] || '(not set)';
+                    output += `${key}=${val}\n`;
+                }
+                this.envVars = output;
+            },
+
+            formatBytes(bytes) {
+                if (!bytes) return '—';
+                if (bytes < 1024) return bytes + ' B';
+                if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            },
+
+            showToast(message) {
+                const container = document.getElementById('toast-container');
+                if (!container) return;
+                const toast = document.createElement('div');
+                toast.className = 'toast toast-success';
+                toast.innerHTML = `<div class="flex items-center"><i data-lucide="check" class="w-5 h-5"></i><span class="ml-2">${message}</span></div>`;
+                container.appendChild(toast);
+                lucide.createIcons();
+                setTimeout(() => toast.remove(), 3000);
+            },
+        }
+    }
+</script>
+{% endblock %}

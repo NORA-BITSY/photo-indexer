@@ -1,0 +1,374 @@
+{% extends "base.html" %}
+
+{% block title %}Assets - Photo Indexer{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-white">Assets</h1>
+            <p class="text-gray-500 dark:text-gray-400">Browse and manage indexed assets</p>
+        </div>
+        <div class="flex space-x-2">
+            <button @click="exportAssets('csv')" class="btn btn-secondary">
+                <i data-lucide="download" class="w-4 h-4 mr-2"></i> Export CSV
+            </button>
+            <button @click="exportAssets('json')" class="btn btn-secondary">
+                <i data-lucide="download" class="w-4 h-4 mr-2"></i> Export JSON
+            </button>
+        </div>
+    </div>
+
+    <!-- Filters sidebar + Grid -->
+    <div class="flex flex-col lg:flex-row gap-6">
+        <!-- Filters Sidebar -->
+        <aside class="lg:w-64 flex-shrink-0" x-show="!mobileView">
+            <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-6 sticky top-24 h-fit">
+                <div>
+                    <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Filters</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
+                            <select x-model="filters.status" @change="fetchAssets()" class="input w-full text-sm">
+                                <option value="">All</option>
+                                <option value="pending">Pending</option>
+                                <option value="indexed">Indexed</option>
+                                <option value="analyzed">Analyzed</option>
+                                <option value="enriched">Enriched</option>
+                                <option value="error">Error</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Performer</label>
+                            <input type="text" x-model="filters.performer_id" @input.debounce.300ms="fetchAssets()" placeholder="Performer ID..." class="input w-full text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Date From</label>
+                            <input type="date" x-model="filters.date_from" @change="fetchAssets()" class="input w-full text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Date To</label>
+                            <input type="date" x-model="filters.date_to" @change="fetchAssets()" class="input w-full text-sm">
+                        </div>
+                        <div class="space-y-2">
+                            <label class="flex items-center">
+                                <input type="checkbox" x-model="filters.has_faces" @change="fetchAssets()" class="rounded border-gray-300">
+                                <span class="ml-2 text-sm">Has faces</span>
+                            </label>
+                            <label class="flex items-center">
+                                <input type="checkbox" x-model="filters.has_measurements" @change="fetchAssets()" class="rounded border-gray-300">
+                                <span class="ml-2 text-sm">Has measurements</span>
+                            </label>
+                        </div>
+                        <div>
+                            <button @click="clearFilters()" class="btn btn-secondary btn-sm w-full">Clear Filters</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Mobile filters toggle -->
+        <button @click="mobileView = !mobileView" class="lg:hidden btn btn-secondary">
+            <i data-lucide="sliders-horizontal" class="w-4 h-4 mr-2"></i> Filters
+        </button>
+
+        <!-- Assets Grid -->
+        <div class="flex-1">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center space-x-4">
+                    <span class="text-sm text-gray-500" x-text="total + ' assets'"></span>
+                    <select x-model="viewMode" class="input w-32 text-sm">
+                        <option value="grid">Grid</option>
+                        <option value="list">List</option>
+                    </select>
+                </div>
+                <div class="flex space-x-2" x-show="selectedAssets.length > 0">
+                    <span class="text-sm text-gray-500 self-center" x-text="selectedAssets.length + ' selected'"></span>
+                    <div class="relative">
+                        <button class="btn btn-primary" @click="showBatchMenu = true">
+                            <i data-lucide="check-square" class="w-4 h-4 mr-2"></i> Batch
+                        </button>
+                        <div x-show="showBatchMenu" @click.away="showBatchMenu = false" class="absolute right-0 mt-1 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-10">
+                            <button @click="batchOperation('analyze')" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">Analyze (VLM)</button>
+                            <button @click="batchOperation('enrich')" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">Enrich (NER)</button>
+                            <button @click="batchOperation('faces')" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">Detect Faces</button>
+                            <button @click="batchOperation('body-pose')" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">Body Pose</button>
+                            <button @click="batchOperation('sidecar')" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">Write Sidecar</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Grid view -->
+            <div x-show="viewMode === 'grid'" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-4" x-show="assets.length > 0">
+                <template x-for="asset in assets" :key="asset.id">
+                    <div class="asset-card group relative bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
+                        :class="{ 'ring-2 ring-primary-500': selectedAssets.includes(asset.id) }"
+                        @click="toggleSelect(asset.id)">
+                        <div class="aspect-square relative overflow-hidden bg-gray-100 dark:bg-gray-700">
+                            <img :src="getAssetThumb(asset)" :alt="asset.filename"
+                                class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                loading="lazy">
+                            <!-- Selection checkbox -->
+                            <div class="absolute top-2 left-2">
+                                <input type="checkbox" :checked="selectedAssets.includes(asset.id)"
+                                    @click.stop="toggleSelect(asset.id)"
+                                    class="w-5 h-5 rounded border-gray-300 text-primary-600 focus:ring-primary-500">
+                            </div>
+                            <!-- Status badge -->
+                            <div class="absolute top-2 right-2">
+                                <span class="px-2 py-0.5 text-xs font-medium rounded-full"
+                                    :class="getStatusClass(asset.status)"
+                                    x-text="asset.status"></span>
+                            </div>
+                            <!-- Quick badges -->
+                            <div class="absolute bottom-2 left-2 right-2 flex gap-1 justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                <template x-for="badge in getBadges(asset)" :key="badge">
+                                    <span class="px-1.5 py-0.5 text-xs rounded bg-black/70 text-white" x-text="badge"></span>
+                                </template>
+                            </div>
+                        </div>
+                        <div class="p-3">
+                            <h3 class="text-sm font-medium text-gray-900 dark:text-white truncate" x-text="asset.filename" title="asset.filename"></h3>
+                            <div class="flex items-center justify-between mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                <span x-text="formatBytes(asset.file_size)"></span>
+                                <span x-text="asset.face_count + ' faces'"></span>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- List view -->
+            <div x-show="viewMode === 'list'" class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden" x-show="assets.length > 0">
+                <table class="w-full">
+                    <thead class="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                        <tr>
+                            <th class="px-6 py-3 w-10"><input type="checkbox" @click="selectAll()" :checked="allSelected" :indeterminate="indeterminate" class="rounded border-gray-300"></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Thumbnail</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Filename</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Faces</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                        <template x-for="asset in assets" :key="asset.id">
+                            <tr :class="{ 'bg-primary-50 dark:bg-primary-900/20': selectedAssets.includes(asset.id) }">
+                                <td class="px-6 py-4"><input type="checkbox" :checked="selectedAssets.includes(asset.id)" @click.stop="toggleSelect(asset.id)" class="rounded border-gray-300"></td>
+                                <td class="px-6 py-4">
+                                    <img :src="getAssetThumb(asset)" :alt="asset.filename" class="w-16 h-16 object-cover rounded">
+                                </td>
+                                <td class="px-6 py-4">
+                                    <div class="font-medium text-gray-900 dark:text-white" x-text="asset.filename"></div>
+                                    <div class="text-sm text-gray-500 font-mono" x-text="asset.id.slice(0, 8) + '...'"></div>
+                                </td>
+                                <td class="px-6 py-4">
+                                    <span class="px-2 py-0.5 text-xs font-medium rounded-full"
+                                        :class="getStatusClass(asset.status)"
+                                        x-text="asset.status"></span>
+                                </td>
+                                <td class="px-6 py-4 text-sm text-gray-500" x-text="formatBytes(asset.file_size)"></td>
+                                <td class="px-6 py-4 text-sm text-gray-500" x-text="asset.face_count"></td>
+                                <td class="px-6 py-4 text-sm text-gray-500" x-text="asset.enriched_at ? new Date(asset.enriched_at).toLocaleDateString() : '—'"></td>
+                                <td class="px-6 py-4">
+                                    <button @click.stop="openDetail(asset.id)" class="btn btn-secondary btn-sm">View</button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="text-center py-12" x-show="assets.length === 0">
+                <i data-lucide="image-off" class="w-16 h-16 text-gray-400 mx-auto mb-4"></i>
+                <p class="text-gray-500 dark:text-gray-400">No assets found</p>
+            </div>
+
+            <!-- Pagination / Load more -->
+            <div class="flex justify-center pt-4">
+                <button @click="loadMore()" :disabled="loading || offset + limit >= total" class="btn btn-primary">
+                    <span x-show="!loading">Load More (<span x-text="offset + assets.length"></span> / <span x-text="total"></span>)</span>
+                    <span x-show="loading"><i data-lucide="loader-2" class="w-4 h-4 animate-spin mr-2"></i> Loading...</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Asset Detail Modal -->
+    <div x-show="detailAsset" x-transition class="fixed inset-0 z-50 overflow-y-auto" @click.self="closeDetail()">
+        <div class="flex min-h-full items-center justify-center p-4">
+            <div class="fixed inset-0 bg-black/50" @click="closeDetail()"></div>
+            <div class="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+                    <h2 class="text-lg font-semibold" x-text="detailAsset.filename"></h2>
+                    <button @click="closeDetail()" class="text-gray-400 hover:text-gray-500">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+                <div class="flex-1 overflow-y-auto" id="asset-detail">
+                    <div class="p-8 text-center">
+                        <i data-lucide="loader-2" class="w-8 h-8 animate-spin text-primary-500 mx-auto mb-2"></i>
+                        <p class="text-gray-500">Loading asset details...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    function assetsPage() {
+        return {
+            assets: [],
+            total: 0,
+            limit: 50,
+            offset: 0,
+            loading: false,
+            viewMode: 'grid',
+            filters: { status: '', performer_id: '', date_from: '', date_to: '', has_faces: false, has_measurements: false },
+            selectedAssets: [],
+            detailAsset: null,
+            mobileView: false,
+            showBatchMenu: false,
+
+            async init() {
+                await this.fetchAssets();
+            },
+
+            async fetchAssets(reset = true) {
+                if (reset) {
+                    this.offset = 0;
+                    this.assets = [];
+                }
+                this.loading = true;
+
+                const params = new URLSearchParams({
+                    limit: this.limit,
+                    offset: this.offset,
+                });
+                Object.entries(this.filters).forEach(([k, v]) => {
+                    if (v !== '' && v !== false && v !== null) params.append(k, v);
+                }
+
+                const resp = await fetch(`/api/v1/assets?${params}`, {
+                    headers: Alpine.store('auth').getHeaders()
+                });
+                const data = await resp.json();
+
+                if (reset) this.assets = [];
+                this.assets = [...this.assets, ...(data.assets || [])];
+                this.total = data.total || this.assets.length;
+                this.loading = false;
+            },
+
+            loadMore() {
+                this.offset += this.limit;
+                this.fetchAssets(false);
+            },
+
+            toggleSelect(id) {
+                const idx = this.selectedAssets.indexOf(id);
+                if (idx >= 0) this.selectedAssets.splice(idx, 1);
+                else this.selectedAssets.push(id);
+            },
+
+            get allSelected() {
+                return this.assets.length > 0 && this.selectedAssets.length === this.assets.length;
+            },
+
+            get indeterminate() {
+                return this.selectedAssets.length > 0 && this.selectedAssets.length < this.assets.length;
+            },
+
+            selectAll() {
+                if (this.allSelected) {
+                    this.selectedAssets = [];
+                } else {
+                    this.selectedAssets = this.assets.map(a => a.id);
+                }
+            },
+
+            clearFilters() {
+                this.filters = { status: '', performer_id: '', date_from: '', date_to: '', has_faces: false, has_measurements: false };
+                this.fetchAssets();
+            },
+
+            getAssetThumb(asset) {
+                return `/api/v1/assets/${asset.id}/thumbnail?size=preview`;
+            },
+
+            getStatusClass(status) {
+                const classes = {
+                    pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+                    indexed: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+                    analyzed: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
+                    enriched: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+                    error: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+                };
+                return classes[status] || 'bg-gray-100 text-gray-800';
+            },
+
+            getBadges(asset) {
+                const badges = [];
+                if (asset.has_vlm) badges.push('VLM');
+                if (asset.face_count > 0) badges.push(`${asset.face_count} faces`);
+                if (asset.has_measurements) badges.push('Meas.');
+                return badges;
+            },
+
+            formatBytes(bytes) {
+                if (!bytes) return '—';
+                if (bytes < 1024) return bytes + ' B';
+                if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            },
+
+            async openDetail(id) {
+                this.detailAsset = this.assets.find(a => a.id === id);
+                if (!this.detailAsset) return;
+
+                // Load detail via HTMX
+                await htmx.ajax('GET', `/assets/partials/detail?asset_id=${id}`, {
+                    target: '#asset-detail',
+                    swap: 'innerHTML',
+                });
+            },
+
+            closeDetail() {
+                this.detailAsset = null;
+            },
+
+            async batchOperation(op) {
+                if (this.selectedAssets.length === 0) return;
+                this.showBatchMenu = false;
+
+                const resp = await fetch('/api/v1/assets/batch', {
+                    method: 'POST',
+                    headers: { ...Alpine.store('auth').getHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ asset_ids: this.selectedAssets, operations: [op] }),
+                });
+
+                if (resp.ok) {
+                    const job = await resp.json();
+                    Alpine.store('jobs').connect(job.job_id);
+                }
+            },
+
+            exportAssets(format) {
+                const params = new URLSearchParams({ format });
+                Object.entries(this.filters).forEach(([k, v]) => {
+                    if (v !== '' && v !== false && v !== null) params.append(k, v);
+                });
+                window.open(`/api/v1/assets/export?${params}`, '_blank');
+            },
+        }
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+
+{% block title %}Jobs - Photo Indexer{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-white">Jobs Dashboard</h1>
+            <p class="text-gray-500 dark:text-gray-400">Monitor and manage background jobs</p>
+        </div>
+        <div class="flex space-x-2">
+            <button @click="refreshJobs()" class="btn btn-secondary">
+                <i data-lucide="refresh-cw" class="w-4 h-4 mr-2"></i> Refresh
+            </button>
+            <button @click="retryFailed()" class="btn btn-secondary" :disabled="retrying">
+                <i data-lucide="rotate-ccw" class="w-4 h-4 mr-2"></i> Retry Failed
+            </button>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+        <div class="flex flex-wrap gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
+                <select x-model="filters.type" @change="fetchJobs()" class="input w-48">
+                    <option value="">All types</option>
+                    <option value="vlm_analyze">VLM Analyze</option>
+                    <option value="ner_enrich">NER Enrich</option>
+                    <option value="face_detect">Face Detect</option>
+                    <option value="body_pose">Body Pose</option>
+                    <option value="build_profile">Build Profile</option>
+                    <option value="facial_biometrics">Facial Biometrics</option>
+                    <option value="sidecar_write">Sidecar Write</option>
+                    <option value="batch_operation">Batch Operation</option>
+                    <option value="tag_import">Tag Import</option>
+                    <option value="backup">Backup</option>
+                    <option value="semantic_auto_tag">Semantic Auto-tag</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
+                <select x-model="filters.status" @change="fetchJobs()" class="input w-40">
+                    <option value="">All statuses</option>
+                    <option value="pending">Pending</option>
+                    <option value="running">Running</option>
+                    <option value="completed">Completed</option>
+                    <option value="failed">Failed</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+            </div>
+            <div class="flex items-end">
+                <button @click="clearFilters()" class="btn btn-secondary btn-sm">Clear</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Jobs table -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Progress</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Message</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Created</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Duration</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                    <template x-for="job in jobs" :key="job.id">
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                                    :class="getTypeClass(job.type)"
+                                    x-text="job.type.replace(/_/g, ' ')"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                                    :class="getStatusClass(job.status)"
+                                    x-text="job.status"></span>
+                            </td>
+                            <td class="px-6 py-4">
+                                <div class="w-32 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                    <div class="h-full bg-primary-500 transition-all duration-300"
+                                        :style="'width: ' + (job.progress * 100) + '%'"></div>
+                                </div>
+                                <span class="text-xs text-gray-500 ml-2" x-text="Math.round(job.progress * 100) + '%'"></span>
+                            </td>
+                            <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 max-w-xs truncate" x-text="job.message"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400" x-text="formatDate(job.created_at)"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400" x-text="getDuration(job)"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                                <button @click="viewJobDetail(job)" class="btn btn-secondary btn-sm">View</button>
+                                <button @click="cancelJob(job.id)" :disabled="job.status !== 'pending' && job.status !== 'running'"
+                                    class="btn btn-danger btn-sm">Cancel</button>
+                                <button @click="retryJob(job)" :disabled="job.status !== 'failed'"
+                                    class="btn btn-secondary btn-sm">Retry</button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <div class="text-sm text-gray-500" x-text="'Showing ' + (offset + 1) + ' to ' + Math.min(offset + limit, total) + ' of ' + total"></div>
+            <div class="flex space-x-2">
+                <button @click="prevPage()" :disabled="offset === 0" class="btn btn-secondary btn-sm">Previous</button>
+                <button @click="nextPage()" :disabled="offset + limit >= total" class="btn btn-secondary btn-sm">Next</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Job detail modal -->
+    <div x-show="detailJob" x-transition class="fixed inset-0 z-50 overflow-y-auto" @click.self="closeDetail()">
+        <div class="flex min-h-full items-center justify-center p-4">
+            <div class="fixed inset-0 bg-black/50" @click="closeDetail()"></div>
+            <div class="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+                    <h2 class="text-lg font-semibold">Job Details</h2>
+                    <button @click="closeDetail()" class="text-gray-400 hover:text-gray-500">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+                <div class="flex-1 overflow-y-auto p-4" id="job-detail">
+                    <div class="text-center py-8">
+                        <i data-lucide="loader-2" class="w-8 h-8 animate-spin text-primary-500 mx-auto mb-2"></i>
+                        <p class="text-gray-500">Loading...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    function jobsPage() {
+        return {
+            jobs: [],
+            total: 0,
+            limit: 50,
+            offset: 0,
+            filters: { type: '', status: '' },
+            detailJob: null,
+            retrying: false,
+
+            async init() {
+                await this.fetchJobs();
+            },
+
+            async fetchJobs() {
+                const params = new URLSearchParams({
+                    limit: this.limit,
+                    offset: this.offset,
+                });
+                Object.entries(this.filters).forEach(([k, v]) => {
+                    if (v) params.append(k, v);
+                }
+
+                const resp = await fetch(`/api/v1/jobs?${params}`, {
+                    headers: Alpine.store('auth').getHeaders()
+                });
+                const data = await resp.json();
+                this.jobs = data || [];
+                this.total = this.jobs.length; // API doesn't return total, approximate
+            },
+
+            viewJobDetail(job) {
+                this.detailJob = job;
+                this.$nextTick(() => {
+                    htmx.ajax('GET', `/jobs/partials/job_detail?job_id=${job.id}`, {
+                        target: '#job-detail',
+                        swap: 'innerHTML',
+                    });
+                    // Connect to SSE for real-time updates
+                    Alpine.store('jobs').connect(job.id);
+                });
+            },
+
+            closeDetail() {
+                if (this.detailJob) {
+                    Alpine.store('jobs').disconnect(this.detailJob.id);
+                }
+                this.detailJob = null;
+            },
+
+            async cancelJob(id) {
+                if (!confirm('Cancel this job?')) return;
+                const resp = await fetch(`/api/v1/jobs/${id}`, {
+                    method: 'DELETE',
+                    headers: Alpine.store('auth').getHeaders(),
+                });
+                if (resp.ok) {
+                    await this.fetchJobs();
+                }
+            },
+
+            async retryJob(job) {
+                const resp = await fetch('/api/v1/jobs', {
+                    method: 'POST',
+                    headers: { ...Alpine.store('auth').getHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ job_type: job.type, payload: job.payload }),
+                });
+                if (resp.ok) {
+                    const newJob = await resp.json();
+                    Alpine.store('jobs').connect(newJob.id);
+                    await this.fetchJobs();
+                }
+            },
+
+            async retryFailed() {
+                this.retrying = true;
+                const failedJobs = this.jobs.filter(j => j.status === 'failed');
+                for (const job of failedJobs) {
+                    await this.retryJob(job);
+                }
+                this.retrying = false;
+                await this.fetchJobs();
+            },
+
+            refreshJobs() {
+                this.fetchJobs();
+            },
+
+            clearFilters() {
+                this.filters = { type: '', status: '' };
+                this.fetchJobs();
+            },
+
+            prevPage() {
+                if (this.offset >= this.limit) {
+                    this.offset -= this.limit;
+                    this.fetchJobs();
+                }
+            },
+
+            nextPage() {
+                this.offset += this.limit;
+                this.fetchJobs();
+            },
+
+            getTypeClass(type) {
+                const classes = {
+                    vlm_analyze: 'bg-blue-100 text-blue-800',
+                    ner_enrich: 'bg-purple-100 text-purple-800',
+                    face_detect: 'bg-green-100 text-green-800',
+                    body_pose: 'bg-orange-100 text-orange-800',
+                    build_profile: 'bg-indigo-100 text-indigo-800',
+                    facial_biometrics: 'bg-pink-100 text-pink-800',
+                    sidecar_write: 'bg-teal-100 text-teal-800',
+                    batch_operation: 'bg-gray-100 text-gray-800',
+                    tag_import: 'bg-yellow-100 text-yellow-800',
+                    backup: 'bg-red-100 text-red-800',
+                    semantic_auto_tag: 'bg-cyan-100 text-cyan-800',
+                };
+                return classes[type] || 'bg-gray-100 text-gray-800';
+            },
+
+            getStatusClass(status) {
+                const classes = {
+                    pending: 'bg-yellow-100 text-yellow-800',
+                    running: 'bg-blue-100 text-blue-800',
+                    completed: 'bg-green-100 text-green-800',
+                    failed: 'bg-red-100 text-red-800',
+                    cancelled: 'bg-gray-100 text-gray-800',
+                };
+                return classes[status] || 'bg-gray-100 text-gray-800';
+            },
+
+            formatDate(dateStr) {
+                if (!dateStr) return '—';
+                return new Date(dateStr).toLocaleString();
+            },
+
+            getDuration(job) {
+                if (!job.started_at) return '—';
+                const start = new Date(job.started_at).getTime();
+                const end = job.completed_at ? new Date(job.completed_at).getTime() : Date.now();
+                const ms = end - start;
+                if (ms < 1000) return ms + 'ms';
+                if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+                return (ms / 60000).toFixed(1) + 'm';
+            },
+        }
+    }
+</script>
+{% endblock %}

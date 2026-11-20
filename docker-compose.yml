@@ -102,15 +102,15 @@ services:
     image: ${IMMICH_ANALYZE_IMAGE:-ghcr.io/timasoft/immich-analyze:0.3.0}
     container_name: immich-analyze
     restart: unless-stopped
+    network_mode: host
     depends_on:
       - immich-server
       - ollama
     environment:
       TZ: ${TZ:-UTC}
-      IMMICH_API_URL: http://immich-server:2283/api
+      IMMICH_API_URL: http://localhost:2283/api
       IMMICH_API_KEY: ${IMMICH_API_KEY:-}
-      OLLAMA_URL: http://ollama:11434
-      OLLAMA_MODEL: ${VLM_MODEL:-llava}
+      OLLAMA_MODEL: ${VLM_MODEL:-qwen2.5vl:7b}
       # Optional tuning (consult immich-analyze docs for supported vars):
       # ANALYZE_INTERVAL: ${ANALYZE_INTERVAL:-3600}
       # DRY_RUN: ${ANALYZE_DRY_RUN:-false}
@@ -136,6 +136,44 @@ services:
     working_dir: /scripts
     entrypoint: ["/bin/sh", "-lc"]
     command: ["echo 'Use scripts/exiftool_dump.sh or scripts/write_xmp_sidecar.sh inside this container.'"]
+
+  photo-indexer-web:
+    build: ./photo-indexer-web
+    container_name: photo-indexer-web
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./:/data:rw
+      - ./photo-indexer-web/web:/app/web:ro
+    environment:
+      - DATABASE_PATH=/data/photo_index.db
+      - IMMICH_URL=http://immich-server:2283/api
+      - IMMICH_API_KEY=${IMMICH_API_KEY:-}
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - REDIS_URL=redis://redis:6379
+      - SECRET_KEY=ad8497acd1c6857a8cf3c5da350669e350dcfc52aa416c11435b15a3c74cc8ae
+      - ACCESS_TOKEN_EXPIRE_MINUTES=60
+      - WEB_USERNAME=${WEB_USERNAME:-admin}
+      - WEB_PASSWORD=${WEB_PASSWORD:-changeme}
+      - MEDIA_ROOTS=library:/data/library,staging:/data/staging
+      - MAX_UPLOAD_SIZE=10485760
+      - JOB_TIMEOUT_SECONDS=3600
+      - JOB_CONCURRENCY_VLM=1
+      - JOB_CONCURRENCY_FACE=2
+      - JOB_CONCURRENCY_BODY=2
+      - JOB_CONCURRENCY_DEFAULT=4
+      - PYTHONPATH=/app
+    depends_on:
+      - immich-server
+      - database
+      - ollama
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   model-cache:

@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "photo-indexer-web"
+version = "0.1.0"
+description = "Companion Web UI for photo-indexer CLI"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.109",
+    "uvicorn[standard]>=0.27",
+    "jinja2>=3.1",
+    "httpx>=0.26",
+    "python-multipart>=0.0.6",
+    "prometheus-client>=0.19",
+    "aiofiles>=23.2",
+    "sse_starlette>=2.0",
+    "sqlalchemy[asyncio]>=2.0",
+    "pydantic-settings>=2.1",
+    "redis>=5.0",
+    "aiosqlite>=0.19",
+    "python-jose[cryptography]>=3.3",
+    "passlib[bcrypt]>=1.7",
+    "python-dotenv>=1.0",
+    "opencv-python>=4.8",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.1",
+    "ruff>=0.1",
+    "black>=23.0",
+    "mypy>=1.7",
+]
+
+[project.scripts]
+photo-indexer-web = "web.main:main"
+
+[tool.setuptools]
+packages = ["web"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true

@@ -1,0 +1,338 @@
+{% extends "base.html" %}
+
+{% block title %}Tags - Photo Indexer{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-white">Tags</h1>
+            <p class="text-gray-500 dark:text-gray-400">Manage simple and semantic tags</p>
+        </div>
+        <div class="flex space-x-2">
+            <button @click="showImportModal = true" class="btn btn-secondary">
+                <i data-lucide="upload" class="w-4 h-4 mr-2"></i> Import Tags
+            </button>
+            <button @click="exportTags('csv')" class="btn btn-secondary">
+                <i data-lucide="download" class="w-4 h-4 mr-2"></i> Export CSV
+            </button>
+        </div>
+    </div>
+
+    <!-- Simple tags section -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+        <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold">Simple Tags</h2>
+        </div>
+        <div class="p-4">
+            <!-- Tag cloud -->
+            <div class="flex flex-wrap gap-2" x-show="simpleTags.length > 0">
+                <template x-for="tag in simpleTags" :key="tag.tag_name">
+                    <button @click="filterByTag(tag.tag_name)"
+                        class="tag-chip px-3 py-1 rounded-full text-sm transition-colors"
+                        :class="activeTag === tag.tag_name ? 'bg-primary-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-primary-100 dark:hover:bg-primary-900'">
+                        <span x-text="tag.tag_name"></span>
+                        <span class="ml-1 text-xs opacity-70" x-text="tag.count"></span>
+                    </button>
+                </template>
+            </div>
+            <p class="text-gray-500 dark:text-gray-400 text-sm" x-show="simpleTags.length === 0">No tags yet</p>
+
+            <!-- Tag management table -->
+            <div class="mt-8 overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Tag</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Count</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                        <template x-for="tag in simpleTags" :key="tag.tag_name">
+                            <tr>
+                                <td class="px-6 py-4"><span class="font-medium" x-text="tag.tag_name"></span></td>
+                                <td class="px-6 py-4 text-sm text-gray-500" x-text="tag.count"></td>
+                                <td class="px-6 py-4">
+                                    <button @click="renameTag(tag.tag_name)" class="btn btn-secondary btn-sm text-xs mr-2">Rename</button>
+                                    <button @click="deleteTag(tag.tag_name)" class="btn btn-danger btn-sm text-xs">Delete</button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Semantic tags section -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 mt-6">
+        <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <h2 class="text-lg font-semibold">Semantic Tags</h2>
+            <button @click="showSemanticImportModal = true" class="btn btn-secondary btn-sm">Auto-tag Assets</button>
+        </div>
+
+        <div class="p-4" x-show="namespaces.length > 0">
+            <!-- Namespace tabs -->
+            <div class="flex flex-wrap gap-2 mb-4 border-b border-gray-200 dark:border-gray-700">
+                <template x-for="ns in namespaces" :key="ns">
+                    <button @click="activeNamespace = ns"
+                        class="px-4 py-2 text-sm font-medium rounded-t-lg transition-colors"
+                        :class="activeNamespace === ns ? 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300 border-b-2 border-primary-500' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'">
+                        <span x-text="ns"></span>
+                    </button>
+                </template>
+            </div>
+
+            <!-- Keys in active namespace -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" x-show="namespaceKeys.length > 0">
+                <template x-for="key in namespaceKeys" :key="key.key">
+                    <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="font-medium" x-text="key.key"></span>
+                            <span class="text-xs text-gray-500" x-text="key.count + ' assets'"></span>
+                        </div>
+                        <div class="w-full h-2 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+                            <div class="h-full bg-primary-500" :style="'width: ' + (key.avg_confidence || 0) * 100 + '%'"></div>
+                        </div>
+                        <div class="text-xs text-gray-500 mt-1" x-text="'Avg confidence: ' + (key.avg_confidence * 100).toFixed(0) + '%'"></div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <p class="p-4 text-gray-500 dark:text-gray-400 text-center" x-show="namespaces.length === 0">
+            No semantic tags yet. Run auto-tagging or add manually.
+        </p>
+    </div>
+
+    <!-- Asset filter by tag -->
+    <div x-show="activeTag" class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+        <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <h2 class="text-lg font-semibold">Assets tagged with "<span x-text="activeTag"></span>"</h2>
+            <button @click="activeTag = null" class="text-gray-400 hover:text-gray-500">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <div class="p-4">
+            <!-- Would show asset grid here -->
+            <p class="text-gray-500">Asset filtering by tag - integrate with assets page</p>
+        </div>
+    </div>
+
+    <!-- Import modal -->
+    <div x-show="showImportModal" x-transition class="fixed inset-0 z-50 overflow-y-auto" @click.self="showImportModal = false">
+        <div class="flex min-h-full items-center justify-center p-4">
+            <div class="fixed inset-0 bg-black/50" @click="showImportModal = false"></div>
+            <div class="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full">
+                <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+                    <h2 class="text-lg font-semibold">Import Tags</h2>
+                    <button @click="showImportModal = false" class="text-gray-400 hover:text-gray-500">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+                <div class="p-4 space-y-4">
+                    <p class="text-sm text-gray-500">Upload a TSV/CSV file with format: <code>asset_id\t tag1,tag2,tag3</code> or <code>path\t tag1,tag2</code></p>
+                    <input type="file" @change="handleFileSelect($event)" accept=".tsv,.csv,.txt" class="input w-full">
+                    <div x-show="importPreview.length > 0" class="max-h-60 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded p-2">
+                        <table class="w-full text-sm">
+                            <thead><tr class="text-left"><th>Asset ID / Path</th><th>Tags</th></tr></thead>
+                            <tbody>
+                                <template x-for="row in importPreview" :key="row.id">
+                                    <tr><td class="font-mono" x-text="row.identifier"></td><td x-text="row.tags.join(', ')"></td></tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="flex justify-end space-x-3 pt-4">
+                        <button @click="showImportModal = false" class="btn btn-secondary">Cancel</button>
+                        <button @click="confirmImport()" class="btn btn-primary" :disabled="importPreview.length === 0">Import</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Semantic auto-tag modal -->
+    <div x-show="showSemanticImportModal" x-transition class="fixed inset-0 z-50 overflow-y-auto" @click.self="showSemanticImportModal = false">
+        <div class="flex min-h-full items-center justify-center p-4">
+            <div class="fixed inset-0 bg-black/50" @click="showSemanticImportModal = false"></div>
+            <div class="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
+                <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+                    <h2 class="text-lg font-semibold">Semantic Auto-tagging</h2>
+                    <button @click="showSemanticImportModal = false" class="text-gray-400 hover:text-gray-500">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+                <div class="p-4 space-y-4">
+                    <p class="text-sm text-gray-500">Run VLM-based semantic tagging on assets.</                    <div>
+                        <label class="block text-sm font-medium">Namespaces (comma-separated, optional)</label>
+                        <input type="text" x-model="semanticNamespaces" placeholder="content,style,emotional,technical" class="input w-full mt-1">
+                    </div>
+                    <label class="flex items-center">
+                        <input type="checkbox" x-model="semanticForce">
+                        <span class="ml-2 text-sm">Force recompute (overwrite existing)</span>
+                    </label>
+                    <div class="flex justify-end space-x-3 pt-4">
+                        <button @click="showSemanticImportModal = false" class="btn btn-secondary">Cancel</button>
+                        <button @click="startSemanticTagging()" class="btn btn-primary">Start Auto-tagging</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    function tagsPage() {
+        return {
+            simpleTags: [],
+            namespaces: [],
+            namespaceKeys: [],
+            activeNamespace: '',
+            activeTag: null,
+            showImportModal: false,
+            showSemanticImportModal: false,
+            importFile: null,
+            importPreview: [],
+            semanticNamespaces: '',
+            semanticForce: false,
+
+            async init() {
+                await Promise.all([this.fetchSimpleTags(), this.fetchNamespaces()]);
+            },
+
+            async fetchSimpleTags() {
+                const resp = await fetch('/api/v1/tags', {
+                    headers: Alpine.store('auth').getHeaders()
+                });
+                const data = await resp.json();
+                this.simpleTags = data.tags || [];
+            },
+
+            async fetchNamespaces() {
+                const resp = await fetch('/api/v1/tags/namespaces', {
+                    headers: Alpine.store('auth').getHeaders()
+                });
+                const data = await resp.json();
+                this.namespaces = data.namespaces || [];
+                if (this.namespaces.length > 0) {
+                    this.activeNamespace = this.namespaces[0];
+                    await this.fetchNamespaceKeys();
+                }
+            },
+
+            async fetchNamespaceKeys() {
+                if (!this.activeNamespace) return;
+                const resp = await fetch(`/api/v1/tags/namespaces/${this.activeNamespace}/keys`, {
+                    headers: Alpine.store('auth').getHeaders()
+                });
+                const data = await resp.json();
+                this.namespaceKeys = data.keys || [];
+            },
+
+            filterByTag(tag) {
+                this.activeTag = tag;
+            },
+
+            handleFileSelect(event) {
+                this.importFile = event.target.files[0];
+                if (!this.importFile) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const text = e.target.result;
+                    this.parseImportFile(text);
+                };
+                reader.readAsText(this.importFile);
+            },
+
+            parseImportFile(text) {
+                const lines = text.trim().split('\n');
+                this.importPreview = [];
+                lines.forEach((line, i) => {
+                    if (i === 0 && line.toLowerCase().includes('asset')) return; // skip header
+                    const parts = line.split('\t');
+                    if (parts.length >= 2) {
+                        this.importPreview.push({
+                            id: i,
+                            identifier: parts[0].trim(),
+                            tags: parts[1].split(',').map(t => t.trim()).filter(Boolean),
+                        });
+                    }
+                });
+            },
+
+            async confirmImport() {
+                if (!this.importFile) return;
+
+                const formData = new FormData();
+                formData.append('file', this.importFile);
+
+                const resp = await fetch('/api/v1/tags/import', {
+                    method: 'POST',
+                    headers: Alpine.store('auth').getHeaders(),
+                    body: formData,
+                });
+
+                if (resp.ok) {
+                    const job = await resp.json();
+                    Alpine.store('jobs').connect(job.job_id);
+                    this.showImportModal = false;
+                    this.importFile = null;
+                    this.importPreview = [];
+                } else {
+                    alert('Import failed');
+                }
+            },
+
+            async renameTag(oldName) {
+                const newName = prompt(`Rename "${oldName}" to:`);
+                if (!newName || newName === oldName) return;
+
+                const resp = await fetch('/api/v1/tags/merge', {
+                    method: 'POST',
+                    headers: { ...Alpine.store('auth').getHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ from_tags: [oldName], to_tag: newName }),
+                });
+
+                if (resp.ok) {
+                    await this.fetchSimpleTags();
+                }
+            },
+
+            async deleteTag(name) {
+                if (!confirm(`Delete tag "${name}" from all assets?`)) return;
+                // Would need a delete endpoint - for now just alert
+                alert('Delete endpoint not implemented yet');
+            },
+
+            startSemanticTagging() {
+                this.showSemanticImportModal = false;
+                const namespaces = this.semanticNamespaces.split(',').map(s => s.trim()).filter(Boolean);
+                const resp = await fetch('/api/v1/tags/semantic/assets/batch/auto-tag', {
+                    method: 'POST',
+                    headers: { ...Alpine.store('auth').getHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        asset_ids: [], // all assets
+                        namespaces: namespaces.length > 0 ? namespaces : undefined,
+                        force_recompute: this.semanticForce,
+                    }),
+                });
+
+                if (resp.ok) {
+                    const job = await resp.json();
+                    Alpine.store('jobs').connect(job.job_id);
+                }
+            },
+
+            exportTags(format) {
+                window.open(`/api/v1/tags/export?format=${format}`, '_blank');
+            },
+        }
+    }
+</script>
+{% endblock %}
